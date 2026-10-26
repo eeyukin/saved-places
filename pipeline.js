@@ -78,8 +78,14 @@
     return (2 * hit) / (A.length + B.length);
   }
 
-  /** Similarity of two venue names, 0..1. Ignores generic words like "cafe" and "the". */
+  /** Similarity of two venue names, 0..1. Also tries the part before " | ", " - ", "(" etc., since listings often add taglines. */
   function nameSimilarity(a, b) {
+    const heads = (x) => { const h = (x || '').split(/\s+[|–—-]\s+|\s*[|(@]\s*/)[0].trim(); return h && h !== x ? [x, h] : [x]; };
+    let best = 0;
+    for (const x of heads(a)) for (const y of heads(b)) best = Math.max(best, nameSimilarity1(x, y));
+    return best;
+  }
+  function nameSimilarity1(a, b) {
     const ta = coreTokens(a), tb = coreTokens(b);
     if (!ta.length || !tb.length) return 0;
     const ja = ta.join(''), jb = tb.join('');
