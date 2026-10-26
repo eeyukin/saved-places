@@ -337,6 +337,7 @@
       <p class="muted" style="margin-top:-6px">Give it whatever you have. The caption or a screenshot works best.</p>
       <label for="iUrl">Instagram link</label>
       <input type="url" id="iUrl" placeholder="https://www.instagram.com/reel/…" value="${esc(imp.url)}" inputmode="url">
+      <small>A pasted link can't be read here. Share the post from Instagram to the <b>Saved Places</b> shortcut and it reads the caption for you.</small>
       <label for="iText">Caption, or text from the post</label>
       <textarea id="iText" placeholder="Paste the caption here, e.g. 📍 Merchant's Lane, Petaling Street…">${esc(imp.text)}</textarea>
       <label>Screenshot of the post (optional)</label>
@@ -385,7 +386,7 @@
 
   async function runImport() {
     imp.stage = 'running'; imp.startedAt = Date.now(); imp.steps = { clues: 'run' }; imp.error = null; drawImportRunning();
-    const clues0 = SP.extractClues(imp.text, imp.url);
+    const clues0 = SP.extractClues(imp.text, imp.url, imp.account || null);
     // Same Instagram post already saved? Don't search again.
     if (clues0.shortcode && !imp.fromPending) {
       const existing = (await store.all('posts')).find((p) => p.shortcode === clues0.shortcode && p.venueId);
@@ -397,7 +398,7 @@
     if (settings.useNominatimFallback) providers.push(SP.nominatimProvider(fetch.bind(window), sleep));
     try {
       const result = await SP.identify({
-        text: imp.text, url: imp.url, providers, region: settings.region, thresholds: settings.thresholds,
+        text: imp.text, url: imp.url, account: imp.account || null, providers, region: settings.region, thresholds: settings.thresholds,
         onStep: (k, data) => {
           if (k === 'clues') { imp.steps.clues = 'ok'; imp.steps.search = 'run'; }
           if (k === 'search') imp.steps.searchLabel = `Searching ${data.provider === 'photon' ? 'OpenStreetMap (Photon)' : 'OpenStreetMap (Nominatim)'}${data.queries.length ? ': ' + data.queries.slice(0, 2).join(', ') : ''}`;
@@ -426,7 +427,7 @@
     const top = r.candidates[0], second = r.candidates[1];
     await logEvent({
       type: 'import', postId: imp.postId, url: imp.url || (r.clues && r.clues.url) || '', shortcode: r.clues && r.clues.shortcode,
-      hadText: !!(imp.text || '').trim(), hadScreenshot: !!imp.photo,
+      hadText: !!(imp.text || '').trim(), hadScreenshot: !!imp.photo, metaStatus: imp.metaStatus || 'not_sent',
       nameClues: (r.clues.names || []).map((n) => `${n.name} [${n.source}]`).join('; '), areas: (r.clues.areas || []).map((a) => a.name).join('; '),
       menuItems: (r.clues.menuItems || []).length, candidates: r.candidates.length,
       topName: top ? top.name : '', topScore: top ? top.score : '', secondScore: second ? second.score : '', level: r.decision.level || '',
@@ -570,7 +571,7 @@
     };
     document.getElementById('csvBtn').onclick = async () => {
       const rows = (await store.all('log')).sort((a, b) => a.at.localeCompare(b.at));
-      const cols = ['at', 'type', 'url', 'shortcode', 'hadText', 'hadScreenshot', 'nameClues', 'areas', 'menuItems', 'candidates', 'topName', 'topScore', 'secondScore', 'level', 'outcome', 'chosenName', 'chosenRank', 'ms', 'errors', 'venueName'];
+      const cols = ['at', 'type', 'url', 'shortcode', 'hadText', 'hadScreenshot', 'metaStatus', 'nameClues', 'areas', 'menuItems', 'candidates', 'topName', 'topScore', 'secondScore', 'level', 'outcome', 'chosenName', 'chosenRank', 'ms', 'errors', 'venueName'];
       const csv = [cols.join(',')].concat(rows.map((r) => cols.map((c) => `"${String(r[c] ?? '').replace(/"/g, '""')}"`).join(','))).join('\n');
       download(`saved-places-test-log-${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv');
     };
@@ -600,7 +601,7 @@
   // ?gmaps=<expanded google maps link>&gtext=<shared text>     -> completes the active import, or saves a new place
   async function handleIncoming() {
     const qp = new URLSearchParams(location.search);
-    if (![...qp.keys()].some((k) => ['url', 'text', 'gmaps', 'gtext'].includes(k))) return false;
+    if (![...qp.keys()].some((k) => ['url', 'text', 'gmaps', 'gtext', 'meta'].includes(k))) return false;
     history.replaceState(null, '', location.pathname + location.hash);
     const url = (qp.get('url') || '').trim(), text = qp.get('text') || '', gmaps = qp.get('gmaps') || '', gtext = qp.get('gtext') || '';
     const looksMaps = (s) => /google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/.test(s);
@@ -612,9 +613,14 @@
       await finishManual({ ...place, mapsUrl: gmaps || url }, imp.postId ? 'google_maps_fallback' : 'google_maps_direct');
       return true;
     }
-    imp = { postId: null, url, text, photo: null, startedAt: Date.now(), result: null, stage: 'form' };
-    if (!text.trim()) setTimeout(() => toast('Got the link. Paste the caption or add a screenshot so I can find the place.', 4500), 300);
-    location.hash = '#/import?auto=' + (text.trim() ? '1' : '0') + '&t=' + Date.now();
+    // Experimental: preview tags the Shortcut read from the post page on the phone.
+    const meta = SP.parseInstagramMeta(qp.get('meta') || '');
+    const account = meta.status === 'ok' ? { handle: meta.handle, accountName: meta.accountName } : null;
+    const fullText = [meta.caption, text].filter((x) => x && x.trim()).join('\n');
+    imp = { postId: null, url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: null, startedAt: Date.now(), result: null, stage: 'form' };
+    const usable = fullText.trim() || account;
+    if (!usable) setTimeout(() => toast(meta.status === 'login' ? "Instagram didn't share the caption for this post. Add a screenshot instead." : 'Got the link. Add a screenshot or the caption so I can find the place.', 5000), 300);
+    location.hash = '#/import?auto=' + (usable ? '1' : '0') + '&t=' + Date.now();
     return true;
   }
 

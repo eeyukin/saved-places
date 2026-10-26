@@ -150,13 +150,48 @@
     return out;
   }
 
+  function decodeEntities(s) {
+    return (s || '').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d))
+      .replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  }
+
+  /**
+   * Parse the preview tags (og:title / og:description) of an Instagram post page, as fetched by the
+   * user's own phone. Returns {status: 'ok'|'login'|'none', caption, handle, accountName}.
+   */
+  function parseInstagramMeta(raw) {
+    const out = { status: 'none', caption: '', handle: null, accountName: null };
+    if (!raw || !raw.trim()) return out;
+    const tags = {};
+    (raw.match(/<meta\b[^>]*>/gi) || []).forEach((t) => {
+      const key = (t.match(/(?:property|name)\s*=\s*["']([^"']+)["']/i) || [])[1];
+      const val = (t.match(/content\s*=\s*"([^"]*)"/i) || t.match(/content\s*=\s*'([^']*)'/i) || [])[1];
+      if (key && val != null && !tags[key.toLowerCase()]) tags[key.toLowerCase()] = decodeEntities(val);
+    });
+    const desc = tags['og:description'] || tags.description || '';
+    const title = tags['og:title'] || '';
+    if (!desc && !title) return out;
+    // e.g. 1,234 likes, 56 comments - merchantslane on October 1, 2026: "Our pandan pancakes are back..."
+    const d = desc.match(/^(?:[\d.,KkMm]+\s+likes?,\s*[\d.,KkMm]+\s+comments?\s*-\s*)?([A-Za-z0-9._]{2,30}) on [^:]{3,40}:\s*([\s\S]*)$/);
+    // e.g. Merchant's Lane on Instagram: "Our pandan pancakes..."
+    const t = title.match(/^([\s\S]*?) on Instagram:\s*([\s\S]*)$/i) || title.match(/^([\s\S]*?)\s*\(@([A-Za-z0-9._]+)\)/);
+    const unquote = (x) => (x || '').trim().replace(/^["“]/, '').replace(/["”]\.?$/, '').trim();
+    if (d) { out.handle = d[1]; out.caption = unquote(d[2]); }
+    if (t) { out.accountName = t[1].trim() || null; if (!out.caption && t[2] && !/^[A-Za-z0-9._]+$/.test(t[2])) out.caption = unquote(t[2]); }
+    if (!out.caption && /log ?in|sign up|create an account/i.test(desc + ' ' + title)) { out.status = 'login'; return out; }
+    out.status = out.caption || out.accountName ? 'ok' : 'none';
+    return out;
+  }
+
   // ---------- Stage 1: clues ----------
   /**
    * @param {string} text  caption, pasted text, and/or screenshot text (OCR)
    * @param {string} url   Instagram link, if any
    * @returns {Clues}
    */
-  function extractClues(text, url) {
+  function extractClues(text, url, account) {
+    account = account || {};
     text = (text || '').replace(/ /g, ' ');
     const ig = parseInstagramUrl(url);
     const lines = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -175,12 +210,14 @@
       const m = line.match(pinRe);
       if (!m) continue;
       const parts = m[1].split(/\s*(?:\||,| - | – | @ |\/)\s*/).filter(Boolean);
-      if (parts.length && !isAreaOnly(parts[0])) addName(parts[0].replace(/^@/, '').replace(/[._]/g, (c) => (parts[0].startsWith('@') ? ' ' : c)), 'pin', line);
+      if (!parts.length || isAreaOnly(parts[0])) continue;
+      const nm = parts[0].startsWith('@') ? parts[0].slice(1).replace(/[._]+/g, ' ').replace(/\b(kl|my|mys|malaysia|official|hq)\b/gi, '').trim() : parts[0];
+      addName(nm, 'pin', line);
     }
 
     // b) Instagram header in screenshots: "handle • Follow" then location tag on the next line.
     const handleLine = /^@?([a-z0-9._]{3,30})(?:\s*[✓✔☑️]+)?(?:\s*[•·]\s*(?:follow(?:ing)?)?|\s+follow(?:ing)?)?$/i;
-    let creator = null;
+    let creator = account.handle || null;
     for (let i = 0; i < Math.min(lines.length, 14); i++) {
       const hm = lines[i].match(handleLine);
       if (!hm || UI_NOISE.test(lines[i]) || /^\d+$/.test(hm[1])) continue;
@@ -200,6 +237,10 @@
       const words = h.replace(/[._]+/g, ' ').replace(/\b(kl|my|mys|malaysia|official|hq)\b/gi, '').trim();
       if (words && h.toLowerCase() !== (creator || '').toLowerCase()) addName(words, 'mention', '@' + h);
     }
+
+    // c2) The posting account itself (often the venue when a business posts its own content)
+    if (account.accountName) addName(account.accountName, 'account', 'account name');
+    if (account.handle) addName(account.handle.replace(/[._]+/g, ' ').replace(/\b(kl|my|mys|malaysia|official|hq)\b/gi, '').trim(), 'account', '@' + account.handle);
 
     // d) Short Title Case lines (weak)
     let weak = 0;
@@ -226,7 +267,7 @@
     const categories = detectCategories(text + ' ' + hashtags.join(' ').replace(/_/g, ' '));
 
     // Rank and dedupe names: pin > tag > mention > line
-    const rank = { pin: 0, tag: 1, mention: 2, line: 3 };
+    const rank = { pin: 0, tag: 1, mention: 2, account: 3, line: 4 };
     const seen = new Set();
     const nameClues = names.sort((a, b) => rank[a.source] - rank[b.source]).filter((n) => {
       const k = coreTokens(n.name).join(' '); if (!k || seen.has(k)) return false; seen.add(k); return true;
@@ -309,7 +350,7 @@
   }
 
   // ---------- Stage 4: scoring ----------
-  const SOURCE_BONUS = { pin: 15, tag: 15, mention: 8, line: 0 };
+  const SOURCE_BONUS = { pin: 15, tag: 15, mention: 8, account: 5, line: 0 };
 
   function scoreCandidate(clues, c, region) {
     const reasons = [];
@@ -317,7 +358,7 @@
     for (const n of clues.names) { const s = nameSimilarity(n.name, c.name); if (s > best.sim) best = { sim: s, clue: n }; }
     let score = Math.round(50 * best.sim);
     reasons.push(`name ${Math.round(best.sim * 100)}% like "${best.clue ? best.clue.name : '—'}"`);
-    if (best.clue && best.sim >= 0.5 && SOURCE_BONUS[best.clue.source]) { score += SOURCE_BONUS[best.clue.source]; reasons.push(`name from ${best.clue.source === 'pin' ? '📍 line' : best.clue.source === 'tag' ? 'location tag' : '@mention'}`); }
+    if (best.clue && best.sim >= 0.5 && SOURCE_BONUS[best.clue.source]) { score += SOURCE_BONUS[best.clue.source]; reasons.push(`name from ${best.clue.source === 'pin' ? '📍 line' : best.clue.source === 'tag' ? 'location tag' : best.clue.source === 'account' ? 'posting account' : '@mention'}`); }
 
     const hay = norm([c.address, c.area, c.city].join(' '));
     const areaHit = clues.areas.find((a) => {
@@ -376,10 +417,10 @@
   }
 
   /** Full pipeline: clues -> search -> score -> decide. Providers are tried in order until one gives a usable match. */
-  async function identify({ text, url, providers, region, thresholds, onStep }) {
+  async function identify({ text, url, account, providers, region, thresholds, onStep }) {
     const step = onStep || (() => {});
     const t0 = Date.now();
-    const clues = extractClues(text, url);
+    const clues = extractClues(text, url, account);
     step('clues', clues);
     const queries = buildQueries(clues);
     let all = [], errors = [];
@@ -400,7 +441,7 @@
   const SP = {
     AREAS, CATEGORIES, CATEGORY_WORDS, FOOD_TYPES, DEFAULT_THRESHOLDS,
     norm, nameSimilarity, haversineKm, findAreas, detectCategories, parseInstagramUrl, parseGoogleMaps,
-    extractClues, buildQueries, googleMapsSearchUrl, photonProvider, nominatimProvider,
+    extractClues, parseInstagramMeta, decodeEntities, buildQueries, googleMapsSearchUrl, photonProvider, nominatimProvider,
     scoreCandidate, scoreCandidates, decide, findDuplicate, identify,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = SP; else root.SP = SP;

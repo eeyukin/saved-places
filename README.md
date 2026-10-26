@@ -27,9 +27,11 @@ This version tests one thing: **can it identify venues from real posts?** It's f
 
 ## Part 3 — Make the "Saved Places" share shortcut (about 10 minutes, on your iPhone)
 
-This puts **Saved Places** in the Share menu. It sends the post's link plus the text from your latest screenshot (read on your phone by Apple's Live Text).
+This puts **Saved Places** in Instagram's Share menu. When you share a post, your phone opens the link (like a browser would), reads the post's preview text (caption and account name), and sends it to the app. No screenshot or pasting needed.
 
-Open the **Shortcuts** app → **+** → name it **Saved Places**. Tap the **ⓘ** (details) button → turn on **Show in Share Sheet**. Set *Receive* to **URLs, Text and Images** only. Then add these actions in order (search each name in the action search bar):
+> **Experimental.** This reads Instagram's page preview from your phone. Meta's terms don't permit automated collection, Instagram may show a login page instead of the caption, and it can stop working whenever Instagram changes something. It's for personal testing only. If it doesn't get the caption, the app says so and asks for a screenshot.
+
+Open the **Shortcuts** app → **+** → name it **Saved Places**. Tap the **ⓘ** (details) button → turn on **Show in Share Sheet**. Set *Receive* to **URLs and Text** only. Then add these actions in order (search each name in the action search bar):
 
 | # | Action | Set it to |
 |---|---|---|
@@ -40,36 +42,29 @@ Open the **Shortcuts** app → **+** → name it **Saved Places**. Tap the **ⓘ
 | 5 | ↳ **URL Encode** | *Expanded URL* |
 | 6 | ↳ **Get Text from Input** | *Shortcut Input* |
 | 7 | ↳ **URL Encode** | *Text* (from step 6) |
-| 8 | ↳ **Text** | `https://YOUR-USERNAME.github.io/saved-places/?gmaps=`[*URL Encoded Text* from 5]`&gtext=`[*URL Encoded Text* from 7] |
+| 8 | ↳ **Text** | `https://eeyukin.github.io/saved-places/?gmaps=`[*URL Encoded Text* from 5]`&gtext=`[*URL Encoded Text* from 7] |
 | 9 | ↳ **Open URLs** | *Text* |
 | 10 | ↳ **Stop This Shortcut** | |
-| 11 | **End If** (added automatically with step 3; put **Otherwise** empty) | |
-| 12 | **Find Photos** | Filter: **Is a Screenshot** is *true*, **Date Taken** is *in the last 10 minutes*. Sort by *Date Taken*, *Latest First*. Limit: **1** |
-| 13 | **If** | *Photos* **has any value** |
-| 14 | ↳ **Extract Text from Image** | Image: *Photos* |
-| 15 | ↳ **Set Variable** | Name: `PostText`, Input: *Text from Image* |
-| 16 | **End If** | |
-| 17 | **URL Encode** | *PostText* |
-| 18 | **URL Encode** | *Link* |
-| 19 | **Text** | `https://YOUR-USERNAME.github.io/saved-places/?url=`[*URL Encoded Text* from 18]`&text=`[*URL Encoded Text* from 17] |
-| 20 | **Open URLs** | *Text* |
+| 11 | **End If** (added automatically with step 3; leave **Otherwise** empty) | |
+| 12 | **Get Contents of URL** | URL: *Link* (method GET) |
+| 13 | **Match Text** | Pattern: `<meta[^>]+>` — in: *Contents of URL* |
+| 14 | **Combine Text** | *Matches*, with **New Lines** |
+| 15 | **URL Encode** | *Combined Text* |
+| 16 | **URL Encode** | *Link* |
+| 17 | **Text** | `https://eeyukin.github.io/saved-places/?url=`[*URL Encoded Text* from 16]`&meta=`[*URL Encoded Text* from 15] |
+| 18 | **Open URLs** | *Text* |
 
-If there's no recent screenshot, the link still goes through and the app asks you for the caption.
-
-The first run asks for permission to access Photos. Allow it.
-
-Tip: tap the blue variable names inside an action to pick which earlier result it uses. Getting the right variable in steps 8 and 19 is what matters most.
+Tip: tap the blue variable names inside an action to pick which earlier result it uses. Getting the right variable in steps 8 and 17 is what matters most.
 
 ## Part 4 — Use it
 
 **Save an Instagram post**
-1. Open the post. For Reels, tap **more** so the caption is expanded.
-2. Take a **screenshot** that shows the account name, the location line under it if there is one, and the caption.
-3. Tap Instagram's **Share** (paper-plane) button → **Share to…** / **More** → **Saved Places**.
-4. Safari opens and the app does the rest. You'll see one of three things:
+1. On the post, tap Instagram's **Share** (paper-plane) button → **Share to…** / **More** → **Saved Places**.
+2. Safari opens and the app does the rest. You'll see one of four things:
    - **Saved automatically**: a strong match. Tap *Wrong place?* if it isn't.
    - **Confirm the place**: tap *Yes, this one* or pick another branch.
    - **Help me find it**: tap *Search Google Maps*, open the right place, then **Share → Saved Places**. The place comes back and finishes the import.
+   - **"Instagram didn't share the caption"**: the phone got a login page. Add a screenshot on that screen and the app reads it instead.
 
 **Save a place straight from Google Maps:** in Google Maps, open the place → **Share** → **Saved Places**.
 
