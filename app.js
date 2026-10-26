@@ -151,7 +151,9 @@
   const routes = [];
   const route = (re, fn) => routes.push({ re, fn });
   function parseHash() { const h = location.hash.replace(/^#/, '') || '/'; const [path, qs] = h.split('?'); return { path, params: new URLSearchParams(qs || '') }; }
+  let navSeq = 0; // bumps on every screen change, so slow background work never redraws over a newer screen
   async function render() {
+    navSeq++;
     const { path, params } = parseHash();
     document.querySelectorAll('#tabs a').forEach((a) => a.classList.toggle('on', ('#' + path).startsWith(a.getAttribute('href')) && (a.getAttribute('href') !== '#/' || path === '/')));
     for (const r of routes) { const m = path.match(r.re); if (m) { try { await r.fn(m, params); } catch (e) { console.error(e); $app.innerHTML = `<div class="banner warn">Something went wrong: ${esc(e.message)}</div>`; } window.scrollTo(0, 0); return; } }
@@ -349,15 +351,13 @@
       <input type="url" id="iUrl" placeholder="https://www.instagram.com/reel/…" value="${esc(imp.url)}" inputmode="url">
       <div id="igHelp" class="card" style="margin-top:10px;display:none">
         <div style="font-weight:650">Let Safari read the caption</div>
-        <small>The app can't open Instagram pages itself, so Safari does it:</small>
         <ol style="margin:8px 0 10px;padding-left:20px;font-size:14px;line-height:1.6">
-          <li>Tap <b>Copy link</b> below</li>
-          <li>Open <b>Safari</b>, tap the address bar, <b>paste</b> and go</li>
+          <li>Tap <b>Open in Safari</b></li>
           <li>Close Instagram's sign-up pop-up if it appears</li>
           <li>Tap Safari's <b>Share</b> button → <b>${esc(SHORTCUT_NAME)}</b></li>
         </ol>
-        <div class="row wrap"><button class="btn primary sm" id="copyIg">Copy link</button><a class="btn sm" id="openIg" target="_blank" rel="noopener">Open post</a></div>
-        <small style="display:block;margin-top:6px">If "Open post" jumps to the Instagram app, use Copy link instead.</small>
+        <a class="btn primary block" id="openIg" target="_blank" rel="noopener">Open in Safari</a>
+        <small style="display:block;margin-top:6px">If the Instagram app opens instead, come back, <b>press and hold</b> the button and choose <b>Open in New Tab</b>.</small>
       </div>
       <label for="iText">Caption, or text from the post</label>
       <textarea id="iText" placeholder="Paste the caption here, e.g. 📍 Merchant's Lane, Petaling Street…">${esc(imp.text)}</textarea>
@@ -369,18 +369,15 @@
       ${imp.fromPending ? '<p><button class="btn ghost danger" id="dropBtn">Delete this pending post</button></p>' : ''}`;
     const sync = () => { imp.url = document.getElementById('iUrl').value.trim(); imp.text = document.getElementById('iText').value; };
     const igHelp = () => {
+      if (!document.getElementById('iUrl') || !document.getElementById('igHelp')) return; // screen already changed
       const u = document.getElementById('iUrl').value.trim();
       const show = /instagram\.com\//i.test(u) && (imp.showIgHelp || !document.getElementById('iText').value.trim());
       document.getElementById('igHelp').style.display = show ? 'block' : 'none';
-      if (show) document.getElementById('openIg').href = u;
+      // x-safari-https:// makes iOS open the link in Safari instead of handing it to the Instagram app.
+      if (show) document.getElementById('openIg').href = /iPhone|iPad|iPod/.test(navigator.userAgent) ? u.replace(/^https?:\/\//i, 'x-safari-https://') : u;
     };
     document.getElementById('iUrl').addEventListener('input', igHelp);
     document.getElementById('iText').addEventListener('input', igHelp);
-    document.getElementById('copyIg').onclick = async () => {
-      const u = document.getElementById('iUrl').value.trim();
-      try { await navigator.clipboard.writeText(u); toast('Link copied. Now open Safari and paste it.'); }
-      catch (e) { const el = document.getElementById('iUrl'); el.focus(); el.select(); toast('Select the link and copy it, then paste it in Safari.'); }
-    };
     setTimeout(igHelp, 0);
     document.getElementById('goBtn').onclick = () => {
       sync(); if (!imp.url && !imp.text.trim()) return toast('Add a link, caption or screenshot first');
@@ -425,6 +422,7 @@
   }
 
   async function runImport() {
+    const seq = navSeq;
     imp.stage = 'running'; imp.startedAt = Date.now(); imp.steps = { clues: 'run' }; imp.error = null; drawImportRunning();
     const clues0 = SP.extractClues(imp.text, imp.url, imp.account || null);
     // Same Instagram post already saved? Don't search again.
@@ -460,7 +458,7 @@
       imp.result = { clues: clues0, candidates: [], decision: { level: 'low', why: 'Search failed' }, errors: [e.message], queries: SP.buildQueries(clues0) };
     }
     await saveActive();
-    drawImportResult();
+    if (seq === navSeq) drawImportResult();
   }
 
   async function logImport(outcome, chosen) {
@@ -542,11 +540,12 @@
     bindAnother();
 
     $app.querySelectorAll('[data-pick]').forEach((b) => b.onclick = async () => {
+      const seq = navSeq;
       const c = cands[+b.dataset.pick];
       const post = await store.get('posts', imp.postId);
       const saved = await saveVenueWithPost(c, post, 'confirmed');
       await logImport(+b.dataset.pick === 0 ? 'confirmed_top' : 'picked_other', c);
-      imp.stage = 'done'; imp.outcome = { kind: 'confirmed', venue: saved.venue, merged: saved.merged }; await saveActive(); drawImportResult();
+      imp.stage = 'done'; imp.outcome = { kind: 'confirmed', venue: saved.venue, merged: saved.merged }; await saveActive(); if (seq === navSeq) drawImportResult();
     });
     document.getElementById('reBtn').onclick = async () => {
       const n = document.getElementById('reName').value.trim(); if (!n) return;
