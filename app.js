@@ -370,7 +370,7 @@
     const sync = () => { imp.url = document.getElementById('iUrl').value.trim(); imp.text = document.getElementById('iText').value; };
     const igHelp = () => {
       const u = document.getElementById('iUrl').value.trim();
-      const show = /instagram\.com\//i.test(u) && !document.getElementById('iText').value.trim();
+      const show = /instagram\.com\//i.test(u) && (imp.showIgHelp || !document.getElementById('iText').value.trim());
       document.getElementById('igHelp').style.display = show ? 'block' : 'none';
       if (show) document.getElementById('openIg').href = u;
     };
@@ -528,7 +528,7 @@
       ${levelBanner}
       ${cands.length ? `<div>${cands.map((c, i) => candidateHtml(c, i, i === 0 && dec.level === 'medium')).join('')}</div>` : ''}
       <h3>Search with a different name</h3>
-      <div class="row"><input type="text" id="reName" placeholder="Venue name" value="${esc(cl.names[0] ? cl.names[0].name : '')}"><button class="btn" id="reBtn">Search</button></div>
+      <div class="row"><input type="text" id="reName" placeholder="Venue name, e.g. Aifokato" value="${esc(cl.names[0] ? cl.names[0].name : '')}"><button class="btn" id="reBtn">Search</button></div>
       <h3>Find it in Google Maps</h3>
       <p class="muted" style="margin:4px 0 8px;font-size:14px">Open the search, tap the right place, then Share → <b>Saved Places</b>. It comes back here and finishes this import.</p>
       <a class="btn block" href="${esc(gmaps)}" target="_blank" rel="noopener">Search Google Maps</a>
@@ -548,8 +548,16 @@
       await logImport(+b.dataset.pick === 0 ? 'confirmed_top' : 'picked_other', c);
       imp.stage = 'done'; imp.outcome = { kind: 'confirmed', venue: saved.venue, merged: saved.merged }; await saveActive(); drawImportResult();
     });
-    document.getElementById('reBtn').onclick = () => {
+    document.getElementById('reBtn').onclick = async () => {
       const n = document.getElementById('reName').value.trim(); if (!n) return;
+      // A link pasted here: an Instagram post goes to the Safari steps; a Google Maps place is saved directly.
+      if (/instagram\.com\//i.test(n)) { imp.url = n; imp.showIgHelp = true; imp.stage = 'form'; drawImportForm(); toast('That\'s a post link. Follow the steps to let Safari read its caption.'); return; }
+      if (/google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(n)) {
+        const g = SP.parseGoogleMaps(n, '');
+        if (g.name) return finishManual({ ...g, mapsUrl: n }, 'google_maps_link');
+        return toast('Short Google Maps links can\'t be read here. Open it in Google Maps and share it instead.');
+      }
+      if (/^https?:\/\//i.test(n)) return toast('Type the venue\'s name here, not a link.');
       imp.text = `📍 ${n}\n` + imp.text.replace(/^📍 .*\n/, ''); imp.stage = 'form'; runImport();
     };
     document.getElementById('mSave').onclick = async () => {
