@@ -140,6 +140,12 @@
       venue = venueFromCandidate(candidate, post.clues, status);
       if (post.photo) venue.photo = post.photo;
     }
+    // The post's caption goes into the place's notes (added below any notes already there).
+    if (post.noteCaption) {
+      const cap = post.noteCaption.trim(), who = post.creatorHandle || (post.clues && post.clues.creator);
+      const block = who ? `From @${who}'s post:\n${cap}` : cap;
+      if (!(venue.notes || '').includes(cap.slice(0, 80))) venue.notes = venue.notes ? `${venue.notes}\n\n${block}` : block;
+    }
     await store.put('venues', venue);
     post.venueId = venue.id; post.importStatus = 'saved';
     await store.put('posts', post);
@@ -220,7 +226,7 @@
       <div class="chips" style="margin-top:12px">${SP.CATEGORIES.filter((c) => c !== 'Other').map((c) => `<a class="chip" href="#/places?cat=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
       <a class="card hero-add" href="#/import" style="text-decoration:none;color:inherit;margin-top:10px">
         <div class="thumb" style="background:var(--accent);color:var(--accent-ink);width:48px;height:48px">+</div>
-        <div><div style="font-weight:650">Add a place</div><small>Paste an Instagram link, caption or screenshot</small></div></a>
+        <div><div style="font-weight:650">Add a place</div><small>Paste an Instagram link</small></div></a>
       <a class="card hero-add ${discoverOn() ? '' : 'soon'}" href="#/discover" style="text-decoration:none;color:inherit;margin-top:10px">
         <div class="thumb" style="width:48px;height:48px;font-size:20px">★</div>
         <div><div style="font-weight:650">Discover ${discoverOn() ? '' : '<span class="tag">Coming soon</span>'}</div><small>Places recommended by creators you follow</small></div></a>
@@ -384,9 +390,10 @@
   function drawImportForm() {
     $app.innerHTML = `
       <h1>Add a place</h1>
-      <p class="muted" style="margin-top:-6px">Give it whatever you have. The caption or a screenshot works best.</p>
-      <label for="iUrl">Instagram link</label>
-      <input type="url" id="iUrl" placeholder="https://www.instagram.com/reel/…" value="${esc(imp.url)}" inputmode="url">
+      <p class="muted" style="margin-top:-6px">Paste an Instagram post or Reel link.</p>
+      <input type="url" id="iUrl" placeholder="https://www.instagram.com/reel/…" value="${esc(imp.url)}" inputmode="url" autocapitalize="off" autocomplete="off">
+      <div class="row" style="margin-top:10px"><button class="btn" id="pasteBtn">Paste</button><button class="btn primary grow" id="goBtn">Find this place</button></div>
+      ${imp.received ? `<div class="banner" style="font-size:13px">${esc(imp.received)}</div>` : ''}
       <div id="igHelp" class="card" style="margin-top:10px;display:none">
         <div style="font-weight:650">Let Safari read the caption</div>
         <ol style="margin:8px 0 10px;padding-left:20px;font-size:14px;line-height:1.6">
@@ -397,39 +404,40 @@
         <a class="btn primary block" id="openIg" target="_blank" rel="noopener">Open in Safari</a>
         <small style="display:block;margin-top:6px">If the Instagram app opens instead, come back, <b>press and hold</b> the button and choose <b>Open in New Tab</b>.</small>
       </div>
-      <label for="iText">Caption, or text from the post</label>
-      <textarea id="iText" placeholder="Paste the caption here, e.g. 📍 Merchant's Lane, Petaling Street…">${esc(imp.text)}</textarea>
-      <label>Screenshot of the post (optional)</label>
-      <div class="row"><input type="file" id="iShot" accept="image/*" class="grow"></div>
-      ${imp.received ? `<div class="banner" style="font-size:13px">${esc(imp.received)}</div>` : ''}
-      <div id="ocrState" class="muted" style="font-size:14px;margin-top:6px">${imp.photo ? 'Screenshot attached.' : ''}</div>
-      <div class="row" style="margin-top:16px"><button class="btn" id="pasteBtn">Paste</button><button class="btn primary grow" id="goBtn">Find this place</button></div>
+      <details style="margin-top:22px" ${imp.photo ? 'open' : ''}><summary>No link? Use a screenshot of the post</summary>
+        <div class="row" style="margin-top:8px"><input type="file" id="iShot" accept="image/*" class="grow"></div>
+        <div id="ocrState" class="muted" style="font-size:14px;margin-top:6px">${imp.photo ? 'Screenshot attached.' : ''}</div>
+      </details>
       ${imp.fromPending ? '<p><button class="btn ghost danger" id="dropBtn">Delete this pending post</button></p>' : ''}`;
-    const sync = () => { imp.url = document.getElementById('iUrl').value.trim(); imp.text = document.getElementById('iText').value; };
+    const isIgUrl = (u) => /instagram\.com\//i.test(u || '');
+    const sync = () => { imp.url = document.getElementById('iUrl').value.trim(); };
     const igHelp = () => {
       if (!document.getElementById('iUrl') || !document.getElementById('igHelp')) return; // screen already changed
       const u = document.getElementById('iUrl').value.trim();
-      const isIg = /instagram\.com\//i.test(u);
-      if (isIg && creatorsApi() && !imp.showIgHelp && !document.getElementById('iText').value.trim() && u !== imp.autoReadUrl) {
+      // With the app server set up, a pasted Instagram link is read straight away.
+      if (isIgUrl(u) && creatorsApi() && !imp.showIgHelp && !(imp.text || '').trim() && u !== imp.autoReadUrl) {
         imp.autoReadUrl = u; imp.url = u; clearTimeout(window.__spAuto); window.__spAuto = setTimeout(() => { if (document.getElementById('iUrl')) readThenImport(); }, 500); return;
       }
-      const show = isIg && (imp.showIgHelp || (!creatorsApi() && !document.getElementById('iText').value.trim()));
+      const show = isIgUrl(u) && (imp.showIgHelp || !creatorsApi());
       document.getElementById('igHelp').style.display = show ? 'block' : 'none';
       // x-safari-https:// makes iOS open the link in Safari instead of handing it to the Instagram app.
       if (show) document.getElementById('openIg').href = /iPhone|iPad|iPod/.test(navigator.userAgent) ? u.replace(/^https?:\/\//i, 'x-safari-https://') : u;
     };
     document.getElementById('iUrl').addEventListener('input', igHelp);
-    document.getElementById('iText').addEventListener('input', igHelp);
     setTimeout(igHelp, 0);
     document.getElementById('goBtn').onclick = () => {
-      sync(); if (!imp.url && !imp.text.trim()) return toast('Add a link, caption or screenshot first');
-      if (/instagram\.com\//i.test(imp.url) && !imp.text.trim() && !imp.photo && creatorsApi() && !imp.showIgHelp) return readThenImport();
-      if (/instagram\.com\//i.test(imp.url) && !imp.text.trim() && !imp.photo) { igHelp(); document.getElementById('igHelp').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('A link alone has no caption. Follow the steps to let Safari read it.'); }
-      runImport();
+      sync();
+      if (!imp.url) return toast('Paste an Instagram link first');
+      if (/google\.[a-z.]+\/maps|maps\.app\.goo\.gl|goo\.gl\/maps/i.test(imp.url)) { const g = SP.parseGoogleMaps(imp.url, ''); if (g.name) return finishManual({ ...g, mapsUrl: imp.url }, 'google_maps_link'); }
+      if (!isIgUrl(imp.url)) return toast('That doesn\'t look like an Instagram link');
+      if ((imp.text || '').trim() || imp.photo) return runImport();
+      if (creatorsApi() && !imp.showIgHelp) return readThenImport();
+      igHelp(); document.getElementById('igHelp').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast('Follow the steps to let Safari read the caption.');
     };
     document.getElementById('pasteBtn').onclick = async () => {
-      try { const t = await navigator.clipboard.readText(); if (/instagram\.com/.test(t) && !document.getElementById('iUrl').value) { document.getElementById('iUrl').value = t.trim(); igHelp(); } else document.getElementById('iText').value += (document.getElementById('iText').value ? '\n' : '') + t; }
-      catch (e) { toast('Tap and hold a field, then Paste'); }
+      try { const t = (await navigator.clipboard.readText()).trim(); if (!t) return toast('Nothing copied yet'); document.getElementById('iUrl').value = t; imp.showIgHelp = false; igHelp(); }
+      catch (e) { const el = document.getElementById('iUrl'); el.focus(); toast('Tap and hold the box, then Paste'); }
     };
     document.getElementById('iShot').onchange = async (e) => {
       const f = e.target.files[0]; if (!f) return; sync();
@@ -439,10 +447,10 @@
         st.textContent = 'Reading text from the screenshot… (first time takes ~20 s)';
         const T = await loadTesseract();
         const { data } = await T.recognize(f, 'eng');
-        imp.text = (imp.text ? imp.text + '\n' : '') + data.text.trim();
-        document.getElementById('iText').value = imp.text;
-        st.textContent = 'Text read from the screenshot. Check it, then tap Find.';
-      } catch (err) { st.textContent = 'Could not read the screenshot (' + err.message + '). You can still type the caption.'; }
+        imp.text = data.text.trim(); imp.caption = null; // screenshot text is too messy for notes
+        if (!imp.text) { st.textContent = 'No text found in that screenshot.'; return; }
+        runImport();
+      } catch (err) { st.textContent = 'Could not read the screenshot (' + err.message + ').'; }
     };
     const db = document.getElementById('dropBtn');
     if (db) db.onclick = async () => { await store.del('posts', imp.postId); imp = null; await saveActive(); toast('Deleted'); location.hash = '#/'; };
@@ -471,7 +479,7 @@
       const r = await readPostViaServer(imp.url);
       if (seq !== navSeq) return;
       if (r && r.caption) {
-        imp.text = r.caption; imp.account = r.handle ? { handle: r.handle, accountName: r.name } : null;
+        imp.text = r.caption; imp.caption = r.caption; imp.account = r.handle ? { handle: r.handle, accountName: r.name } : null;
         imp.received = `Read by the app server (${r.source === 'embed' ? 'embed page' : 'post page'}) · caption ✓`;
         return runImport();
       }
@@ -485,7 +493,7 @@
     let post = imp.postId ? await store.get('posts', imp.postId) : null;
     if (!post && clues.shortcode) post = (await store.all('posts')).find((p) => p.shortcode === clues.shortcode) || null;
     if (!post) post = { id: uid(), collectionId: 'personal', venueId: null, addedAt: nowIso(), sharedBy: settings.myName, importStatus: 'pending' };
-    Object.assign(post, { url: clues.url || imp.url || null, shortcode: clues.shortcode, kind: clues.kind, extractedText: imp.text, clues, creatorHandle: clues.creator || null, photo: imp.photo || post.photo || null });
+    Object.assign(post, { noteCaption: imp.caption || post.noteCaption || null, url: clues.url || imp.url || null, shortcode: clues.shortcode, kind: clues.kind, extractedText: imp.text, clues, creatorHandle: clues.creator || null, photo: imp.photo || post.photo || null });
     if (!post.venueId) await store.put('posts', post);
     imp.postId = post.id;
     return post;
@@ -606,7 +614,7 @@
         <label>Location (optional: Google Maps link or "lat, lng")</label><input type="text" id="mLoc" placeholder="3.1422, 101.6981">
         <button class="btn primary" id="mSave" style="margin-top:10px">Save</button></details>
       <h3>What I found in the post</h3>${cluesHtml(cl)}
-      <hr><div class="row wrap"><button class="btn ghost" id="pendBtn">Decide later</button><button class="btn ghost" id="editBtn">Edit text</button><a class="btn ghost" href="#/import" id="another">Start a new one</a></div>`;
+      <hr><div class="row wrap"><button class="btn ghost" id="pendBtn">Decide later</button><button class="btn ghost" id="editBtn">Back</button><a class="btn ghost" href="#/import" id="another">Start a new one</a></div>`;
     bindAnother();
 
     $app.querySelectorAll('[data-pick]').forEach((b) => b.onclick = async () => {
@@ -779,7 +787,7 @@
     $app.querySelectorAll('[data-dsave]').forEach((b) => b.onclick = async () => {
       const d = await store.get('discover', b.dataset.dsave); if (!d || !d.candidate) return;
       const post = { id: uid(), collectionId: 'personal', venueId: null, addedAt: nowIso(), sharedBy: `@${d.handle} (Discover)`, url: d.permalink, shortcode: d.clues.shortcode, kind: d.clues.kind,
-        extractedText: d.caption || '', clues: { names: d.clues.names, areas: d.clues.areas, categories: d.clues.categories, menuItems: [], hashtags: [], creator: d.handle }, creatorHandle: d.handle, importStatus: 'pending' };
+        extractedText: d.caption || '', noteCaption: d.caption || null, clues: { names: d.clues.names, areas: d.clues.areas, categories: d.clues.categories, menuItems: [], hashtags: [], creator: d.handle }, creatorHandle: d.handle, importStatus: 'pending' };
       const saved = await saveVenueWithPost({ ...d.candidate }, post, d.status === 'high' ? 'verified' : 'confirmed');
       d.savedVenueId = saved.venue.id; await store.put('discover', d);
       toast(saved.merged ? `Added to your existing ${saved.venue.name}` : `Saved ${saved.venue.name}`); render();
@@ -900,7 +908,7 @@
     const metaRaw = qp.get('meta') || '';
     const received = `Received from the shortcut: link ${url ? '✓' : '✗ (empty)'} · page data ${metaRaw.length} characters, ${(metaRaw.match(/<meta/gi) || []).length} preview tags · caption ${meta.caption ? '✓' : '✗'}${meta.status === 'login' ? ' (Instagram sent a login page)' : ''}`;
     const thumb = (qp.get('thumb') || '').startsWith('data:image/') ? qp.get('thumb') : null;
-    imp = { postId: null, received: received + (qp.has('thumb') || qp.has('thumberr') ? ` · thumbnail ${thumb ? '✓' : '✗'}` : ''), url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: thumb, startedAt: Date.now(), result: null, stage: 'form' };
+    imp = { postId: null, caption: fullText.trim() || null, received: received + (qp.has('thumb') || qp.has('thumberr') ? ` · thumbnail ${thumb ? '✓' : '✗'}` : ''), url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: thumb, startedAt: Date.now(), result: null, stage: 'form' };
     const usable = fullText.trim() || account;
     if (!usable && /instagram\.com\//i.test(url) && creatorsApi()) { location.hash = '#/import?auto=0&t=' + Date.now(); setTimeout(readThenImport, 50); return true; }
     if (!usable) setTimeout(() => toast(meta.status === 'login' ? "Instagram didn't share the caption for this post. Add a screenshot instead." : 'Got the link. Add a screenshot or the caption so I can find the place.', 5000), 300);
