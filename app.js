@@ -1,4 +1,4 @@
-/* Saved Places — app UI, storage and import flow. Logic for identification lives in pipeline.js (window.SP). */
+/* Valerie's Makan-makan ✨ (Saved Places) — app UI, storage and import flow. Logic for identification lives in pipeline.js (window.SP). */
 (function () {
   'use strict';
   const SP = window.SP;
@@ -188,6 +188,8 @@
     location.hash = '#/';
   }
   window.addEventListener('hashchange', render);
+  // Discover tab stays greyed until Discover is switched on in config.js.
+  if (window.SP_CONFIG && window.SP_CONFIG.discoverEnabled) { const t = document.querySelector('#tabs a[data-tab="discover"]'); if (t) t.classList.remove('soon-tab'); }
   // Tapping "Add" always starts a fresh import, even if you're already on the Add screen.
   document.getElementById('tabs').addEventListener('click', (e) => {
     const a = e.target.closest('a[data-tab="import"]'); if (!a) return;
@@ -213,15 +215,15 @@
     const origin = lastPosition || settings.home || settings.office;
     const nearby = origin ? venues.filter((v) => v.lat != null).map((v) => ({ v, d: SP.haversineKm(origin, v) })).sort((a, b) => a.d - b.d).slice(0, 5) : [];
     $app.innerHTML = `
-      <h1>Saved Places</h1>
+      <h1>Valerie's Makan-makan ✨</h1>
       <form class="search" id="homeSearch">${searchIcon}<input type="search" name="q" placeholder="Cake, ramen, Bangsar, a name…" autocomplete="off" enterkeyhint="search"></form>
       <div class="chips" style="margin-top:12px">${SP.CATEGORIES.filter((c) => c !== 'Other').map((c) => `<a class="chip" href="#/places?cat=${encodeURIComponent(c)}">${esc(c)}</a>`).join('')}</div>
       <a class="card hero-add" href="#/import" style="text-decoration:none;color:inherit;margin-top:10px">
         <div class="thumb" style="background:var(--accent);color:var(--accent-ink);width:48px;height:48px">+</div>
         <div><div style="font-weight:650">Add a place</div><small>Paste an Instagram link, caption or screenshot</small></div></a>
-      <a class="card hero-add" href="#/discover" style="text-decoration:none;color:inherit;margin-top:10px">
+      <a class="card hero-add ${discoverOn() ? '' : 'soon'}" href="#/discover" style="text-decoration:none;color:inherit;margin-top:10px">
         <div class="thumb" style="width:48px;height:48px;font-size:20px">★</div>
-        <div><div style="font-weight:650">Discover</div><small>Places recommended by creators you follow</small></div></a>
+        <div><div style="font-weight:650">Discover ${discoverOn() ? '' : '<span class="tag">Coming soon</span>'}</div><small>Places recommended by creators you follow</small></div></a>
       ${pending.length ? `<h2>Needs your help (${pending.length})</h2>${pending.slice(0, 3).map((p) => `<a class="card venue" href="#/import?post=${p.id}"><div class="thumb">?</div><div class="grow"><div class="name">${esc((p.clues && p.clues.names[0] && p.clues.names[0].name) || 'Unidentified post')}</div><div class="meta">${esc(p.url || 'No link')} · tap to identify</div></div></a>`).join('')}` : ''}
       <h2>Recently saved</h2>
       ${recent.length ? recent.map((v) => venueCard(v)).join('') : `<div class="empty">Nothing saved yet. Share an Instagram post to get started.</div>`}
@@ -596,7 +598,7 @@
       <h3>Search with a different name</h3>
       <div class="row"><input type="text" id="reName" placeholder="Venue name, e.g. Aifokato" value="${esc(cl.names[0] ? cl.names[0].name : '')}"><button class="btn" id="reBtn">Search</button></div>
       <h3>Find it in Google Maps</h3>
-      <p class="muted" style="margin:4px 0 8px;font-size:14px">Open the search, tap the right place, then Share → <b>Saved Places</b>. It comes back here and finishes this import.</p>
+      <p class="muted" style="margin:4px 0 8px;font-size:14px">Open the search, tap the right place, then Share → <b>${esc(SHORTCUT_NAME)}</b>. It comes back here and finishes this import.</p>
       <a class="btn block" href="${esc(gmaps)}" target="_blank" rel="noopener">Search Google Maps</a>
       <details style="margin-top:14px"><summary>Enter it myself</summary>
         <label>Name</label><input type="text" id="mName" value="${esc(cl.names[0] ? cl.names[0].name : '')}">
@@ -651,6 +653,7 @@
 
 
   // ---------------- Discover (creator feeds via Meta Business Discovery) ----------------
+  const discoverOn = () => !!(window.SP_CONFIG && window.SP_CONFIG.discoverEnabled);
   const creatorsApi = () => ((window.SP_CONFIG && window.SP_CONFIG.creatorsApi) || settings.creatorsApi || '').replace(/\/+$/, '');
   async function followedCreators() {
     const saved = await store.kv('creators', null);
@@ -719,6 +722,24 @@
   }
 
   route(/^\/discover$/, async (m, params) => {
+    if (!discoverOn()) {
+      $app.innerHTML = `
+        <h1>Discover <span class="tag">Coming soon</span></h1>
+        <p class="muted" style="margin-top:-6px">Places recommended by food creators you follow, each linked back to their post.</p>
+        <div class="card soon-card">
+          <div style="font-weight:650;margin-bottom:6px">Reminder: set up the Meta API</div>
+          <small>Discover uses Instagram's official Business Discovery API. To switch it on:</small>
+          <ol style="margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.7">
+            <li>Instagram account switched to <b>Professional</b> ✓</li>
+            <li>Create a <b>Facebook Page</b> and link it to that Instagram account (blocked by a Facebook restriction for now)</li>
+            <li>Create a <b>Meta developer app</b> and a 60-day token</li>
+            <li>Add <b>META_TOKEN</b> and <b>IG_USER_ID</b> to the Cloudflare server</li>
+            <li>Ask Claude to switch Discover on</li>
+          </ol>
+          <small style="display:block;margin-top:8px">Full steps: <b>worker/SETUP-SERVER.md</b>, Parts A and B.</small>
+        </div>`;
+      return;
+    }
     const creators = await followedCreators();
     const items = (await store.all('discover')).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
     const savedIds = new Set((await allVenues()).map((v) => v.id));
@@ -842,7 +863,7 @@
     document.getElementById('impFile').onchange = async (e) => {
       const f = e.target.files[0]; if (!f) return;
       try {
-        const data = JSON.parse(await f.text()); if (data.app !== 'saved-places') throw new Error('Not a Saved Places backup');
+        const data = JSON.parse(await f.text()); if (data.app !== 'saved-places') throw new Error("Not a Valerie's Makan-makan backup");
         for (const v of data.venues || []) await store.put('venues', v);
         for (const p of data.posts || []) await store.put('posts', p);
         for (const l of data.log || []) await store.put('log', l);

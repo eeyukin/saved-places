@@ -21,7 +21,7 @@
  * to the public embed page. Experimental and for personal use: Meta's terms restrict automated collection,
  * and Instagram can block this at any time.
  */
-const UA = 'saved-places/0.1 (personal link preview; +https://eeyukin.github.io/saved-places/)';
+const UA = 'saved-places/0.1 (personal link preview; +https://eeyukin.github.io/valerie/)';
 
 function decodeEntities(s) {
   return (s || '').replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
