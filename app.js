@@ -259,7 +259,7 @@
       <div class="filters">
         <select id="sort"><option value="recent">Recently added</option><option value="near">Nearest first</option><option value="az">A to Z</option><option value="visited">Recently visited</option></select>
         <select id="from"><option value="here">From me</option><option value="home" ${settings.home ? '' : 'disabled'}>From home</option><option value="office" ${settings.office ? '' : 'disabled'}>From office</option></select>
-        <select id="within"><option value="">Any distance</option><option value="1">Within 1 km</option><option value="3">Within 3 km</option><option value="5">Within 5 km</option><option value="10">Within 10 km</option></select>
+        <select id="within"><option value="">Any distance</option><option value="2">&lt; 2 km</option><option value="5">&lt; 5 km</option><option value="10">&lt; 10 km</option><option value="20">&lt; 20 km</option><option value="20plus">20 km+</option></select>
         <select id="visited"><option value="">Visited or not</option><option value="no">Not visited</option><option value="yes">Visited</option></select>
         ${people.length > 1 ? `<select id="who"><option value="">Anyone</option>${people.map((p) => `<option ${state.who === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>` : ''}
       </div>
@@ -280,7 +280,7 @@
       if (state.cat) rows = rows.filter(({ v }) => state.cat.startsWith('#') ? (v.tags || []).includes(state.cat.slice(1)) : (v.categories || []).includes(state.cat));
       if (state.visited) rows = rows.filter(({ v }) => !!v.visited === (state.visited === 'yes'));
       if (state.who) rows = rows.filter(({ v }) => (whoBy.get(v.id) || new Set([v.createdBy])).has(state.who));
-      if (state.within && origin) rows = rows.filter(({ d }) => d != null && d <= +state.within);
+      if (state.within && origin) rows = rows.filter(({ d }) => d != null && (state.within === '20plus' ? d >= 20 : d < +state.within));
       const by = { recent: (a, b) => b.v.createdAt.localeCompare(a.v.createdAt), az: (a, b) => a.v.name.localeCompare(b.v.name), near: (a, b) => (a.d ?? 1e9) - (b.d ?? 1e9), visited: (a, b) => (b.v.visitedAt || '').localeCompare(a.v.visitedAt || '') };
       rows.sort(by[state.sort] || by.recent);
       document.getElementById('list').innerHTML = rows.length
