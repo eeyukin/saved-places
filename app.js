@@ -46,7 +46,12 @@
     home: null, office: null, thresholds: { ...SP.DEFAULT_THRESHOLDS }, useNominatimFallback: true, customTags: [],
   };
   let settings = null;
-  async function loadSettings() { settings = Object.assign({}, DEFAULT_SETTINGS, await store.kv('settings', {})); return settings; }
+  const BUILT_IN_KEY = (window.SP_CONFIG && /^AIza/.test(window.SP_CONFIG.googleKey || '')) ? window.SP_CONFIG.googleKey : '';
+  const googleKey = () => settings.googleKey || BUILT_IN_KEY; // a key pasted in Settings wins; otherwise the built-in one
+  async function loadSettings() {
+    settings = Object.assign({}, DEFAULT_SETTINGS, await store.kv('settings', {}));
+    return settings;
+  }
   const saveSettings = () => store.setKv('settings', settings);
 
   // ---------------- Utilities ----------------
@@ -395,7 +400,7 @@
     }
     let post = await ensurePost(clues0);
     const providers = [];
-    if (settings.googleKey) providers.push(SP.googlePlacesProvider(fetch.bind(window), settings.googleKey));
+    if (googleKey()) providers.push(SP.googlePlacesProvider(fetch.bind(window), googleKey()));
     else { providers.push(SP.photonProvider(fetch.bind(window))); if (settings.useNominatimFallback) providers.push(SP.nominatimProvider(fetch.bind(window), sleep)); }
     try {
       const result = await SP.identify({
@@ -481,7 +486,7 @@
     const linkOnly = !(imp.text || '').trim() && !imp.account;
     const levelBanner = linkOnly ? `<div class="banner warn"><b>I only have the link, not the caption.</b><br><small>A link pasted into the app can't be read: browsers block opening Instagram pages. On your iPhone, open the post in Instagram and tap Share → <b>Saved Places</b>; the shortcut reads the caption for you.</small></div>`
       : dec.level === 'medium' ? `<div class="banner">Is this the place? <small>${esc(dec.why)}</small></div>`
-      : `<div class="banner warn">${cands.length ? 'Not sure which place this is.' : r.queries.length ? `No match found in ${settings.googleKey ? 'Google Places' : 'OpenStreetMap'}.` : 'No venue name found in the text.'} <small>${esc(imp.error ? 'Search problem: ' + imp.error : '')}</small></div>`;
+      : `<div class="banner warn">${cands.length ? 'Not sure which place this is.' : r.queries.length ? `No match found in ${googleKey() ? 'Google Places' : 'OpenStreetMap'}.` : 'No venue name found in the text.'} <small>${esc(imp.error ? 'Search problem: ' + imp.error : '')}</small></div>`;
     $app.innerHTML = `
       <h1>${dec.level === 'medium' ? 'Confirm the place' : 'Help me find it'}</h1>
       ${imp.received ? `<div class="muted" style="font-size:12px;margin:-4px 0 8px">${esc(imp.received)}</div>` : ''}
@@ -549,9 +554,9 @@
       <h2>Locations</h2><p class="muted" style="font-size:14px;margin:0">Used for "near home" and "near office". Location is only asked for when you use it.</p>
       ${locRow('home', 'Home')}${locRow('office', 'Office')}
       <h2>Venue lookup</h2>
-      <p class="muted" style="font-size:14px;margin:0">${settings.googleKey ? 'Using <b>Google Places</b>.' : 'Using free OpenStreetMap. Add a Google Places key for much better coverage.'}</p>
+      <p class="muted" style="font-size:14px;margin:0">${googleKey() ? `Using <b>Google Places</b>${!settings.googleKey ? ' (built into the app — nothing to set up).' : ' (your own key).'}` : 'Using free OpenStreetMap. Add a Google Places key for much better coverage.'}</p>
       <label>Google Places API key (stored only on this phone)</label>
-      <div class="row"><input type="text" id="gKey" value="${esc(settings.googleKey || '')}" placeholder="AIza…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn sm" id="gSave">Save</button></div>
+      <div class="row"><input type="text" id="gKey" value="${esc(settings.googleKey || '')}" placeholder="${BUILT_IN_KEY ? 'Optional — built-in key in use' : 'AIza…'}" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn sm" id="gSave">Save</button></div>
       <div class="row" style="margin-top:8px"><button class="btn sm" id="gTest">Test key</button><small id="gTestOut"></small></div>
       <h2>Proof-of-concept test</h2>
       <p class="muted" style="font-size:14px;margin:0">${log.filter((l) => l.type === 'import').length} imports logged. Export the log after testing and send it to Claude.</p>
@@ -566,7 +571,7 @@
       <div class="row wrap" style="margin-top:8px"><button class="btn" id="expBtn">Back up (JSON)</button><label class="btn" style="margin:0;color:var(--text)">Restore<input type="file" id="impFile" accept="application/json,.json" hidden></label></div>
       <p style="margin-top:14px"><button class="btn danger ghost" id="wipeBtn">Delete all my data</button></p>
       <h2>About</h2>
-      <dl class="kv"><dt>Version</dt><dd>${APP_VERSION}</dd><dt>Mode</dt><dd>${standalone ? 'Home-screen web app' : 'Safari'}</dd><dt>Venue data</dt><dd>${settings.googleKey ? 'Google Places (Google Maps)' : '© OpenStreetMap contributors, via Photon and Nominatim'}</dd><dt>Privacy</dt><dd>No account, no Instagram login. Searches send only the venue name and area to OpenStreetMap services.</dd></dl>`;
+      <dl class="kv"><dt>Version</dt><dd>${APP_VERSION}</dd><dt>Mode</dt><dd>${standalone ? 'Home-screen web app' : 'Safari'}</dd><dt>Venue data</dt><dd>${googleKey() ? 'Google Places (Google Maps)' : '© OpenStreetMap contributors, via Photon and Nominatim'}</dd><dt>Privacy</dt><dd>No account, no Instagram login. Searches send only the venue name and area to OpenStreetMap services.</dd></dl>`;
 
     document.getElementById('gSave').onclick = async () => { settings.googleKey = document.getElementById('gKey').value.trim(); await saveSettings(); toast(settings.googleKey ? 'Google key saved' : 'Key removed'); render(); };
     document.getElementById('gTest').onclick = async () => {
