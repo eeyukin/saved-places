@@ -460,6 +460,7 @@
       if (o.kind === 'already') { $app.innerHTML = `<h1>Already saved</h1><div class="banner good">This post is already linked to <b>${esc(o.venue.name)}</b>.</div>${venueCard(o.venue)}<p><a class="btn block" href="#/import" id="another">Add another</a></p>`; bindAnother(); return; }
       const label = o.kind === 'auto' ? 'Saved automatically' : o.kind === 'pending' ? 'Saved as pending' : 'Saved';
       $app.innerHTML = `<h1>${esc(label)}</h1>
+        ${imp.received ? `<div class="muted" style="font-size:12px;margin:-4px 0 8px">${esc(imp.received)}</div>` : ''}
         ${o.kind === 'pending' ? `<div class="banner warn">The link is kept under <b>Needs your help</b> on Home. Open it any time to try again.</div>` : `<div class="banner good">${o.merged ? `Added this post to your existing <b>${esc(o.venue.name)}</b> record.` : `<b>${esc(o.venue.name)}</b> is in your collection${o.kind === 'auto' ? ' (high-confidence match)' : ''}.`}</div>${venueCard(o.venue)}`}
         <div class="row" style="margin-top:12px">${o.kind === 'auto' ? '<button class="btn" id="undoBtn">Wrong place?</button>' : ''}<a class="btn primary grow" href="#/import" id="another">Add another</a></div>`;
       bindAnother();
@@ -482,6 +483,7 @@
       : `<div class="banner warn">${cands.length ? 'Not sure which place this is.' : r.queries.length ? 'No match found in OpenStreetMap.' : 'No venue name found in the text.'} <small>${esc(imp.error ? 'Search problem: ' + imp.error : '')}</small></div>`;
     $app.innerHTML = `
       <h1>${dec.level === 'medium' ? 'Confirm the place' : 'Help me find it'}</h1>
+      ${imp.received ? `<div class="muted" style="font-size:12px;margin:-4px 0 8px">${esc(imp.received)}</div>` : ''}
       ${levelBanner}
       ${cands.length ? `<div>${cands.map((c, i) => candidateHtml(c, i, i === 0 && dec.level === 'medium')).join('')}</div>` : ''}
       <h3>Search with a different name</h3>
