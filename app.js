@@ -208,7 +208,7 @@
     const sub = [v.area || v.city, dist != null ? fmtKm(dist) : null].filter(Boolean).join(' · ');
     return `<a class="card venue" href="#/venue/${v.id}">
       <div class="thumb" style="${cardThumbStyle(v)}">${hasCardImage(v) ? '' : esc(initials(v.name))}</div>
-      <div class="grow"><div class="name">${esc(v.name)}${v.visited ? ' <small>· visited</small>' : ''}</div>
+      <div class="grow"><div class="name">${esc(v.name)} <span class="visited-label ${v.visited ? 'on' : ''}">Visited</span></div>
         <div class="meta">${esc(sub || v.address || '')}</div>
         <div>${(v.categories || []).slice(0, 3).map((c) => `<span class="tag">${esc(c)}</span>`).join('')}${(v.tags || []).slice(0, 2).map((c) => `<span class="tag">#${esc(c)}</span>`).join('')}</div></div></a>`;
   }
@@ -318,8 +318,9 @@
         <a class="btn" href="${esc(mapsLink(v))}" target="_blank" rel="noopener">Google Maps</a>
         <a class="btn" href="${esc(appleMapsLink(v))}" target="_blank" rel="noopener">Apple Maps</a>
       </div>
-      <div class="toggle card"><div><div style="font-weight:600">Visited</div><small>${v.visitedAt ? 'Last on ' + new Date(v.visitedAt).toLocaleDateString() : 'Not yet'}</small></div>
-        <button class="btn sm ${v.visited ? 'primary' : ''}" id="visitBtn">${v.visited ? 'Visited ✓' : 'Mark visited'}</button></div>
+      <button class="toggle card visit-toggle" id="visitBtn" aria-pressed="${v.visited ? 'true' : 'false'}">
+        <span class="visited-label big ${v.visited ? 'on' : ''}">Visited${v.visited ? ' ✓' : ''}</span>
+        <small>${v.visited ? (v.visitedAt ? 'On ' + new Date(v.visitedAt).toLocaleDateString() + ' · tap to undo' : 'Tap to undo') : 'Tap when you\'ve been here'}</small></button>
       <h3>Categories</h3>
       <div class="chips" id="vcats" style="flex-wrap:wrap">${allCats.map((c) => `<span class="chip ${(v.categories || []).includes(c) ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)}</span>`).join('')}</div>
       <div class="row"><input type="text" id="newTag" placeholder="Add your own tag, e.g. date night"><button class="btn sm" id="addTag">Add</button></div>
