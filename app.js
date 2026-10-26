@@ -46,6 +46,7 @@
     home: null, office: null, thresholds: { ...SP.DEFAULT_THRESHOLDS }, useNominatimFallback: true, customTags: [],
   };
   let settings = null;
+  const SHORTCUT_NAME = (window.SP_CONFIG && window.SP_CONFIG.shortcutName) || 'Valerie "Click Here"';
   const BUILT_IN_KEY = (window.SP_CONFIG && /^AIza/.test(window.SP_CONFIG.googleKey || '')) ? window.SP_CONFIG.googleKey : '';
   const googleKey = () => settings.googleKey || BUILT_IN_KEY; // a key pasted in Settings wins; otherwise the built-in one
   async function loadSettings() {
@@ -111,7 +112,7 @@
       lat: c.lat ?? null, lng: c.lng ?? null,
       categories: SP.CATEGORIES.filter((k) => (clues ? clues.categories : []).includes(k) || (c.categories || []).includes(k)),
       tags: [], provider: c.providerId ? c.providerId.split(':')[0] : (c.mapsUrl ? 'gmaps' : 'manual'), providerPlaceId: c.providerId || null, mapsUrl: c.mapsUrl || null,
-      photo: null, status, confidence: c.score ?? null, visited: false, visitedAt: null, notes: '',
+      photo: null, googlePhoto: c.googlePhoto || null, status, confidence: c.score ?? null, visited: false, visitedAt: null, notes: '',
       menuItems: clues ? clues.menuItems : [], keywords: clues ? clues.hashtags.slice(0, 15) : [],
       createdBy: settings.myName, createdAt: nowIso(), lastVerifiedAt: status === 'pending' ? null : nowIso(),
     };
@@ -129,6 +130,7 @@
       venue.menuItems = mergeMenu(venue.menuItems || [], clues.menuItems || []);
       venue.keywords = Array.from(new Set([...(venue.keywords || []), ...(clues.hashtags || [])])).slice(0, 30);
       if (!venue.photo && post.photo) venue.photo = post.photo;
+      if (!venue.googlePhoto && candidate.googlePhoto) venue.googlePhoto = candidate.googlePhoto;
     } else {
       venue = venueFromCandidate(candidate, post.clues, status);
       if (post.photo) venue.photo = post.photo;
@@ -257,7 +259,11 @@
     const statusLabel = { verified: 'Verified automatically', confirmed: 'Confirmed by you', manual: 'Entered manually', pending: 'Pending' }[v.status] || v.status;
     $app.innerHTML = `
       <p><a href="javascript:history.back()">‹ Back</a></p>
-      <div class="photo" style="${thumbStyle(v)}">${v.photo ? '' : esc(initials(v.name))}</div>
+      ${v.googlePhoto && googleKey()
+        ? `<div class="photo" style="background-image:url('https://places.googleapis.com/v1/${esc(v.googlePhoto.name)}/media?maxWidthPx=800&key=${encodeURIComponent(googleKey())}')"></div>
+           <small>Photo${v.googlePhoto.author ? `: ${v.googlePhoto.authorUri ? `<a href="${esc(v.googlePhoto.authorUri)}" target="_blank" rel="noopener">${esc(v.googlePhoto.author)}</a>` : esc(v.googlePhoto.author)}` : ''} · Google Maps</small>
+           ${v.photo ? `<div class="row" style="margin-top:8px"><div class="thumb" style="${thumbStyle(v)};width:56px;height:56px"></div><small>From the Instagram post</small></div>` : ''}`
+        : `<div class="photo" style="${thumbStyle(v)}">${v.photo ? '' : esc(initials(v.name))}</div>`}
       <h1 style="margin-top:14px">${esc(v.name)}</h1>
       <div class="muted">${esc(v.address || 'No address')}</div>
       <div style="margin:6px 0"><span class="status ${esc(v.status)}">${esc(statusLabel)}</span>${d != null ? ` · <small>${fmtKm(d)} from ${esc(origin.label || 'you')}</small>` : ''}</div>
@@ -341,7 +347,18 @@
       <p class="muted" style="margin-top:-6px">Give it whatever you have. The caption or a screenshot works best.</p>
       <label for="iUrl">Instagram link</label>
       <input type="url" id="iUrl" placeholder="https://www.instagram.com/reel/…" value="${esc(imp.url)}" inputmode="url">
-      <small>A pasted link can't be read here. Share the post from Instagram to the <b>Saved Places</b> shortcut and it reads the caption for you.</small>
+      <div id="igHelp" class="card" style="margin-top:10px;display:none">
+        <div style="font-weight:650">Let Safari read the caption</div>
+        <small>The app can't open Instagram pages itself, so Safari does it:</small>
+        <ol style="margin:8px 0 10px;padding-left:20px;font-size:14px;line-height:1.6">
+          <li>Tap <b>Copy link</b> below</li>
+          <li>Open <b>Safari</b>, tap the address bar, <b>paste</b> and go</li>
+          <li>Close Instagram's sign-up pop-up if it appears</li>
+          <li>Tap Safari's <b>Share</b> button → <b>${esc(SHORTCUT_NAME)}</b></li>
+        </ol>
+        <div class="row wrap"><button class="btn primary sm" id="copyIg">Copy link</button><a class="btn sm" id="openIg" target="_blank" rel="noopener">Open post</a></div>
+        <small style="display:block;margin-top:6px">If "Open post" jumps to the Instagram app, use Copy link instead.</small>
+      </div>
       <label for="iText">Caption, or text from the post</label>
       <textarea id="iText" placeholder="Paste the caption here, e.g. 📍 Merchant's Lane, Petaling Street…">${esc(imp.text)}</textarea>
       <label>Screenshot of the post (optional)</label>
@@ -351,9 +368,27 @@
       <div class="row" style="margin-top:16px"><button class="btn" id="pasteBtn">Paste</button><button class="btn primary grow" id="goBtn">Find this place</button></div>
       ${imp.fromPending ? '<p><button class="btn ghost danger" id="dropBtn">Delete this pending post</button></p>' : ''}`;
     const sync = () => { imp.url = document.getElementById('iUrl').value.trim(); imp.text = document.getElementById('iText').value; };
-    document.getElementById('goBtn').onclick = () => { sync(); if (!imp.url && !imp.text.trim()) return toast('Add a link, caption or screenshot first'); runImport(); };
+    const igHelp = () => {
+      const u = document.getElementById('iUrl').value.trim();
+      const show = /instagram\.com\//i.test(u) && !document.getElementById('iText').value.trim();
+      document.getElementById('igHelp').style.display = show ? 'block' : 'none';
+      if (show) document.getElementById('openIg').href = u;
+    };
+    document.getElementById('iUrl').addEventListener('input', igHelp);
+    document.getElementById('iText').addEventListener('input', igHelp);
+    document.getElementById('copyIg').onclick = async () => {
+      const u = document.getElementById('iUrl').value.trim();
+      try { await navigator.clipboard.writeText(u); toast('Link copied. Now open Safari and paste it.'); }
+      catch (e) { const el = document.getElementById('iUrl'); el.focus(); el.select(); toast('Select the link and copy it, then paste it in Safari.'); }
+    };
+    setTimeout(igHelp, 0);
+    document.getElementById('goBtn').onclick = () => {
+      sync(); if (!imp.url && !imp.text.trim()) return toast('Add a link, caption or screenshot first');
+      if (/instagram\.com\//i.test(imp.url) && !imp.text.trim() && !imp.photo) { igHelp(); document.getElementById('igHelp').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('A link alone has no caption. Follow the steps to let Safari read it.'); }
+      runImport();
+    };
     document.getElementById('pasteBtn').onclick = async () => {
-      try { const t = await navigator.clipboard.readText(); if (/instagram\.com/.test(t) && !document.getElementById('iUrl').value) document.getElementById('iUrl').value = t.trim(); else document.getElementById('iText').value += (document.getElementById('iText').value ? '\n' : '') + t; }
+      try { const t = await navigator.clipboard.readText(); if (/instagram\.com/.test(t) && !document.getElementById('iUrl').value) { document.getElementById('iUrl').value = t.trim(); igHelp(); } else document.getElementById('iText').value += (document.getElementById('iText').value ? '\n' : '') + t; }
       catch (e) { toast('Tap and hold a field, then Paste'); }
     };
     document.getElementById('iShot').onchange = async (e) => {
@@ -484,7 +519,7 @@
     const cands = r.candidates.filter((c) => c.score >= 25);
     const gmaps = SP.googleMapsSearchUrl(cl, settings.region);
     const linkOnly = !(imp.text || '').trim() && !imp.account;
-    const levelBanner = linkOnly ? `<div class="banner warn"><b>I only have the link, not the caption.</b><br><small>A link pasted into the app can't be read: browsers block opening Instagram pages. On your iPhone, open the post in Instagram and tap Share → <b>Saved Places</b>; the shortcut reads the caption for you.</small></div>`
+    const levelBanner = linkOnly ? `<div class="banner warn"><b>I only have the link, not the caption.</b><br><small>A link pasted into the app can't be read: browsers block opening Instagram pages. Open the post in <b>Safari</b> and tap Share → <b>${esc(SHORTCUT_NAME)}</b>; the shortcut reads the caption for you.</small></div>`
       : dec.level === 'medium' ? `<div class="banner">Is this the place? <small>${esc(dec.why)}</small></div>`
       : `<div class="banner warn">${cands.length ? 'Not sure which place this is.' : r.queries.length ? `No match found in ${googleKey() ? 'Google Places' : 'OpenStreetMap'}.` : 'No venue name found in the text.'} <small>${esc(imp.error ? 'Search problem: ' + imp.error : '')}</small></div>`;
     $app.innerHTML = `

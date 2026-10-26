@@ -378,7 +378,7 @@
         const res = await fetchFn('https://places.googleapis.com/v1/places:searchText', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey,
-            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.types,places.primaryType,places.googleMapsUri,places.addressComponents' },
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.types,places.primaryType,places.googleMapsUri,places.addressComponents,places.photos' },
           body: JSON.stringify(body),
         });
         if (!res.ok) { let msg = 'Google ' + res.status; try { const e = await res.json(); if (e.error && e.error.message) msg += ': ' + e.error.message; } catch (x) { /* ignore */ } throw new Error(msg); }
@@ -392,6 +392,7 @@
             lat: p.location ? p.location.latitude : null, lng: p.location ? p.location.longitude : null,
             osmType: googleTypeToOsm(types), extraCategories: types.map((t) => GOOGLE_CUISINE[t]).filter(Boolean),
             mapsUrl: p.googleMapsUri || null, source: 'google',
+            googlePhoto: (p.photos && p.photos[0]) ? { name: p.photos[0].name, author: ((p.photos[0].authorAttributions || [])[0] || {}).displayName || '', authorUri: ((p.photos[0].authorAttributions || [])[0] || {}).uri || '' } : null,
           };
         }).filter((c) => c.name);
       },
