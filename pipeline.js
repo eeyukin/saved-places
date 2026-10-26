@@ -245,8 +245,8 @@
     }
 
     // c2) The posting account itself (often the venue when a business posts its own content)
-    if (account.accountName) addName(account.accountName, 'account', 'account name');
-    if (account.handle) addName(account.handle.replace(/[._]+/g, ' ').replace(/\b(kl|my|mys|malaysia|official|hq)\b/gi, '').trim(), 'account', '@' + account.handle);
+    if (account.accountName && !account.creatorOnly) addName(account.accountName, 'account', 'account name');
+    if (account.handle && !account.creatorOnly) addName(account.handle.replace(/[._]+/g, ' ').replace(/\b(kl|my|mys|malaysia|official|hq)\b/gi, '').trim(), 'account', '@' + account.handle);
 
     // d) Short Title Case lines (weak)
     let weak = 0;

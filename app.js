@@ -6,7 +6,7 @@
   const APP_VERSION = '0.1.0-poc';
 
   // ---------------- Storage (IndexedDB) ----------------
-  const DB_NAME = 'saved-places', DB_VER = 1;
+  const DB_NAME = 'saved-places', DB_VER = 2;
   let dbp = null;
   function db() {
     if (dbp) return dbp;
@@ -18,6 +18,7 @@
         if (!d.objectStoreNames.contains('posts')) d.createObjectStore('posts', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('log')) d.createObjectStore('log', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv', { keyPath: 'k' });
+        if (!d.objectStoreNames.contains('discover')) d.createObjectStore('discover', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -64,6 +65,10 @@
   function toast(msg, ms = 2600) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
   function initials(name) { return (name || '?').replace(/^the\s+/i, '').trim().slice(0, 1).toUpperCase(); }
   function hashHue(s) { let h = 0; for (const c of s || '') h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+  const googlePhotoUrl = (v, px) => (v.googlePhoto && v.googlePhoto.name && googleKey()) ? `https://places.googleapis.com/v1/${v.googlePhoto.name}/media?maxWidthPx=${px}&key=${encodeURIComponent(googleKey())}` : null;
+  // List thumbnails: the Google Maps photo, cropped square (background-size: cover); else the post image; else initials.
+  function cardThumbStyle(v) { const g = googlePhotoUrl(v, 240); return g ? `background-image:url('${g}')` : thumbStyle(v); }
+  const hasCardImage = (v) => !!(googlePhotoUrl(v, 240) || v.photo);
   function thumbStyle(v) { return v.photo ? `background-image:url('${v.photo}')` : `background-color:hsl(${hashHue(v.name)} 45% 85% / .5)`; }
   const mapsLink = (v) => v.mapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.name + ' ' + (v.area || v.address || ''))}`;
   const directionsLink = (v) => v.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${v.lat},${v.lng}` : mapsLink(v);
@@ -147,6 +152,28 @@
     return null;
   }
 
+  // Older places found via Google before photos were added: look up their photo once, in the background.
+  let backfilling = false;
+  async function backfillGooglePhotos() {
+    if (backfilling || !googleKey()) return; backfilling = true;
+    try {
+      const todo = (await allVenues()).filter((v) => v.provider === 'google' && v.providerPlaceId && !v.googlePhoto && !v.googlePhotoTried).slice(0, 10);
+      let changed = false;
+      for (const v of todo) {
+        try {
+          const id = v.providerPlaceId.replace(/^google:/, '');
+          const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}`, { headers: { 'X-Goog-Api-Key': googleKey(), 'X-Goog-FieldMask': 'photos' } });
+          const d = res.ok ? await res.json() : {};
+          const ph = (d.photos || [])[0];
+          v.googlePhotoTried = true;
+          if (ph) { const a = (ph.authorAttributions || [])[0] || {}; v.googlePhoto = { name: ph.name, author: a.displayName || '', authorUri: a.uri || '' }; changed = true; }
+          await store.put('venues', v);
+        } catch (e) { /* try again next time */ }
+      }
+      if (changed && /^\/(places)?$/.test(parseHash().path)) render();
+    } finally { backfilling = false; }
+  }
+
   // ---------------- Router ----------------
   const routes = [];
   const route = (re, fn) => routes.push({ re, fn });
@@ -156,17 +183,23 @@
     navSeq++;
     const { path, params } = parseHash();
     document.querySelectorAll('#tabs a').forEach((a) => a.classList.toggle('on', ('#' + path).startsWith(a.getAttribute('href')) && (a.getAttribute('href') !== '#/' || path === '/')));
+    if (path === '/' || path === '/places') setTimeout(backfillGooglePhotos, 500);
     for (const r of routes) { const m = path.match(r.re); if (m) { try { await r.fn(m, params); } catch (e) { console.error(e); $app.innerHTML = `<div class="banner warn">Something went wrong: ${esc(e.message)}</div>`; } window.scrollTo(0, 0); return; } }
     location.hash = '#/';
   }
   window.addEventListener('hashchange', render);
+  // Tapping "Add" always starts a fresh import, even if you're already on the Add screen.
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-tab="import"]'); if (!a) return;
+    e.preventDefault(); location.hash = '#/import?new=' + Date.now();
+  });
 
   const searchIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
 
   function venueCard(v, dist) {
     const sub = [v.area || v.city, dist != null ? fmtKm(dist) : null].filter(Boolean).join(' · ');
     return `<a class="card venue" href="#/venue/${v.id}">
-      <div class="thumb" style="${thumbStyle(v)}">${v.photo ? '' : esc(initials(v.name))}</div>
+      <div class="thumb" style="${cardThumbStyle(v)}">${hasCardImage(v) ? '' : esc(initials(v.name))}</div>
       <div class="grow"><div class="name">${esc(v.name)}${v.visited ? ' <small>· visited</small>' : ''}</div>
         <div class="meta">${esc(sub || v.address || '')}</div>
         <div>${(v.categories || []).slice(0, 3).map((c) => `<span class="tag">${esc(c)}</span>`).join('')}${(v.tags || []).slice(0, 2).map((c) => `<span class="tag">#${esc(c)}</span>`).join('')}</div></div></a>`;
@@ -186,6 +219,9 @@
       <a class="card hero-add" href="#/import" style="text-decoration:none;color:inherit;margin-top:10px">
         <div class="thumb" style="background:var(--accent);color:var(--accent-ink);width:48px;height:48px">+</div>
         <div><div style="font-weight:650">Add a place</div><small>Paste an Instagram link, caption or screenshot</small></div></a>
+      <a class="card hero-add" href="#/discover" style="text-decoration:none;color:inherit;margin-top:10px">
+        <div class="thumb" style="width:48px;height:48px;font-size:20px">★</div>
+        <div><div style="font-weight:650">Discover</div><small>Places recommended by creators you follow</small></div></a>
       ${pending.length ? `<h2>Needs your help (${pending.length})</h2>${pending.slice(0, 3).map((p) => `<a class="card venue" href="#/import?post=${p.id}"><div class="thumb">?</div><div class="grow"><div class="name">${esc((p.clues && p.clues.names[0] && p.clues.names[0].name) || 'Unidentified post')}</div><div class="meta">${esc(p.url || 'No link')} · tap to identify</div></div></a>`).join('')}` : ''}
       <h2>Recently saved</h2>
       ${recent.length ? recent.map((v) => venueCard(v)).join('') : `<div class="empty">Nothing saved yet. Share an Instagram post to get started.</div>`}
@@ -371,7 +407,11 @@
     const igHelp = () => {
       if (!document.getElementById('iUrl') || !document.getElementById('igHelp')) return; // screen already changed
       const u = document.getElementById('iUrl').value.trim();
-      const show = /instagram\.com\//i.test(u) && (imp.showIgHelp || !document.getElementById('iText').value.trim());
+      const isIg = /instagram\.com\//i.test(u);
+      if (isIg && creatorsApi() && !imp.showIgHelp && !document.getElementById('iText').value.trim() && u !== imp.autoReadUrl) {
+        imp.autoReadUrl = u; imp.url = u; clearTimeout(window.__spAuto); window.__spAuto = setTimeout(() => { if (document.getElementById('iUrl')) readThenImport(); }, 500); return;
+      }
+      const show = isIg && (imp.showIgHelp || (!creatorsApi() && !document.getElementById('iText').value.trim()));
       document.getElementById('igHelp').style.display = show ? 'block' : 'none';
       // x-safari-https:// makes iOS open the link in Safari instead of handing it to the Instagram app.
       if (show) document.getElementById('openIg').href = /iPhone|iPad|iPod/.test(navigator.userAgent) ? u.replace(/^https?:\/\//i, 'x-safari-https://') : u;
@@ -381,6 +421,7 @@
     setTimeout(igHelp, 0);
     document.getElementById('goBtn').onclick = () => {
       sync(); if (!imp.url && !imp.text.trim()) return toast('Add a link, caption or screenshot first');
+      if (/instagram\.com\//i.test(imp.url) && !imp.text.trim() && !imp.photo && creatorsApi() && !imp.showIgHelp) return readThenImport();
       if (/instagram\.com\//i.test(imp.url) && !imp.text.trim() && !imp.photo) { igHelp(); document.getElementById('igHelp').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('A link alone has no caption. Follow the steps to let Safari read it.'); }
       runImport();
     };
@@ -409,6 +450,33 @@
     const s = imp.steps || {};
     const li = (k, label) => `<li><span class="dot ${s[k] || ''}"></span>${esc(label)}</li>`;
     $app.innerHTML = `<h1>Finding the place…</h1><ul class="steps card">${li('clues', 'Reading clues from the post')}${li('search', s.searchLabel || 'Searching OpenStreetMap')}${li('score', 'Comparing candidates')}</ul>`;
+  }
+
+  // Read an Instagram post through the app server (Cloudflare Worker /post). Returns null if not set up.
+  async function readPostViaServer(link) {
+    const api = creatorsApi(); if (!api) return null;
+    const res = await fetch(`${api}/post?url=${encodeURIComponent(link)}`);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `Server error ${res.status}`);
+    let caption = d.caption || '', handle = d.handle || null, name = d.name || null;
+    if (d.meta) { const m = SP.parseInstagramMeta(d.meta); caption = caption || m.caption; handle = handle || m.handle; name = name || m.accountName; }
+    return { caption, handle, name, source: d.source };
+  }
+  async function readThenImport() {
+    const seq = navSeq;
+    $app.innerHTML = `<h1>Reading the post…</h1><ul class="steps card"><li><span class="dot run"></span>Getting the caption from Instagram</li></ul>`;
+    try {
+      const r = await readPostViaServer(imp.url);
+      if (seq !== navSeq) return;
+      if (r && r.caption) {
+        imp.text = r.caption; imp.account = r.handle ? { handle: r.handle, accountName: r.name } : null;
+        imp.received = `Read by the app server (${r.source === 'embed' ? 'embed page' : 'post page'}) · caption ✓`;
+        return runImport();
+      }
+      imp.received = 'The app server got the post but no caption';
+    } catch (e) { if (seq !== navSeq) return; imp.received = 'App server: ' + e.message; }
+    imp.showIgHelp = true; imp.stage = 'form'; drawImportForm();
+    toast("Instagram didn't share this post with the server. Use Safari instead (steps below).", 5000);
   }
 
   async function ensurePost(clues) {
@@ -581,6 +649,122 @@
     location.hash = '#/import?auto=0&r=' + Date.now(); drawImportResult();
   }
 
+
+  // ---------------- Discover (creator feeds via Meta Business Discovery) ----------------
+  const creatorsApi = () => ((window.SP_CONFIG && window.SP_CONFIG.creatorsApi) || settings.creatorsApi || '').replace(/\/+$/, '');
+  async function followedCreators() {
+    const saved = await store.kv('creators', null);
+    if (saved) return saved;
+    return ((window.SP_CONFIG && window.SP_CONFIG.creators) || []).map((h) => h.replace(/^@/, '').toLowerCase());
+  }
+  const MAX_LOOKUPS_PER_CHECK = 15; // caps Google searches per "Check for new posts"
+
+  async function checkCreators(onProgress) {
+    const api = creatorsApi(); if (!api) throw new Error('Discover server not set up yet (Settings → Discover server).');
+    const creators = await followedCreators(); if (!creators.length) throw new Error('Follow at least one creator first.');
+    const known = new Set((await store.all('discover')).map((d) => d.id));
+    const providers = googleKey() ? [SP.googlePlacesProvider(fetch.bind(window), googleKey())] : [SP.photonProvider(fetch.bind(window))];
+    let lookups = 0, added = 0; const problems = [];
+    for (const h of creators) {
+      onProgress && onProgress(`Checking @${h}…`);
+      let data;
+      try {
+        const res = await fetch(`${api}/creator?u=${encodeURIComponent(h)}`);
+        data = await res.json();
+        if (!res.ok) { problems.push(`@${h}: ${data.hint || data.error || res.status}`); continue; }
+      } catch (e) { problems.push(`@${h}: ${e.message}`); continue; }
+      for (const post of data.posts || []) {
+        const id = 'ig:' + post.id; if (known.has(id)) continue;
+        const clues = SP.extractClues(post.caption || '', post.permalink || '', { handle: data.account.username, creatorOnly: true });
+        const item = { id, handle: data.account.username, creatorName: data.account.name || null, permalink: post.permalink, timestamp: post.timestamp, type: post.type,
+          clues: { names: clues.names, areas: clues.areas, categories: clues.categories, shortcode: clues.shortcode, kind: clues.kind },
+          status: 'no_name', candidate: null, checkedAt: nowIso() };
+        if (clues.names.length) {
+          if (lookups >= MAX_LOOKUPS_PER_CHECK) { item.status = 'later'; }
+          else {
+            lookups++;
+            onProgress && onProgress(`Finding ${clues.names[0].name}…`);
+            try {
+              const r = await SP.identify({ text: post.caption || '', url: post.permalink || '', account: { handle: data.account.username, creatorOnly: true }, providers, region: settings.region, thresholds: settings.thresholds });
+              const top = r.decision.top;
+              item.status = r.decision.level === 'low' ? 'not_found' : r.decision.level; // high | medium | not_found
+              if (top && r.decision.level !== 'low') item.candidate = { providerId: top.providerId, name: top.name, address: top.address, area: top.area, city: top.city, lat: top.lat, lng: top.lng, categories: top.categories, mapsUrl: top.mapsUrl || null, googlePhoto: top.googlePhoto || null, score: top.score };
+            } catch (e) { item.status = 'later'; }
+          }
+        }
+        // Store the caption privately on this phone only for matching/re-checks; it's never shown or shared.
+        item.caption = (post.caption || '').slice(0, 2000);
+        await store.put('discover', item); added++;
+      }
+    }
+    await store.setKv('discoverCheckedAt', nowIso());
+    return { added, lookups, problems };
+  }
+
+  function discoverCard(d, savedIds) {
+    const c = d.candidate; const when = d.timestamp ? new Date(d.timestamp).toLocaleDateString() : '';
+    const credit = `<small>Recommended by <b>@${esc(d.handle)}</b>${when ? ' · ' + esc(when) : ''} · <a href="${esc(d.permalink || '#')}" target="_blank" rel="noopener">View post</a></small>`;
+    if (!c) return `<div class="card" style="margin-top:10px"><div class="muted" style="font-size:14px">${d.status === 'later' ? 'Not checked yet: tap Check again.' : d.status === 'not_found' ? `Couldn't find "${esc((d.clues.names[0] || {}).name || '')}" on Google.` : 'No venue named in this post.'}</div>${credit}</div>`;
+    const v = { ...c, photo: null };
+    const saved = d.savedVenueId && savedIds.has(d.savedVenueId);
+    const dist = (lastPosition || settings.office || settings.home) ? SP.haversineKm(lastPosition || settings.office || settings.home, c) : null;
+    return `<div class="card venue" style="margin-top:10px;align-items:flex-start">
+      <div class="thumb" style="${cardThumbStyle(v)}">${hasCardImage(v) ? '' : esc(initials(c.name))}</div>
+      <div class="grow"><div class="name">${esc(c.name)}${d.status === 'medium' ? ' <small>· likely</small>' : ''}</div>
+        <div class="meta">${esc([c.area || c.city, dist != null ? fmtKm(dist) : null].filter(Boolean).join(' · ') || c.address || '')}</div>
+        <div>${(c.categories || []).slice(0, 3).map((x) => `<span class="tag">${esc(x)}</span>`).join('')}</div>
+        ${credit}
+        <div class="row" style="margin-top:8px">${saved ? `<a class="btn sm" href="#/venue/${d.savedVenueId}">Saved ✓</a>` : `<button class="btn sm primary" data-dsave="${esc(d.id)}">Save</button>`}
+          <a class="btn sm ghost" target="_blank" rel="noopener" href="${esc(c.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}` : (c.mapsUrl || '#'))}">Directions</a></div></div></div>`;
+  }
+
+  route(/^\/discover$/, async (m, params) => {
+    const creators = await followedCreators();
+    const items = (await store.all('discover')).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+    const savedIds = new Set((await allVenues()).map((v) => v.id));
+    const filter = params.get('show') || 'places';
+    const shown = items.filter((d) => filter === 'all' || d.candidate);
+    const checked = await store.kv('discoverCheckedAt', null);
+    $app.innerHTML = `
+      <h1>Discover</h1>
+      <p class="muted" style="margin-top:-6px;font-size:14px">Places recommended by food creators you follow. Each one links back to the creator's post.</p>
+      ${creatorsApi() ? '' : `<div class="banner warn">The app server isn't set up yet. See the setup guide, then add its address in <a href="#/settings">Settings</a>.</div>`}
+      <div class="chips" id="creatorChips" style="flex-wrap:wrap">${creators.map((h) => `<span class="chip on" data-unfollow="${esc(h)}">@${esc(h)} ✕</span>`).join('') || '<small>No creators yet.</small>'}</div>
+      <div class="row" style="margin-top:6px"><input type="text" id="newCreator" placeholder="@creator handle" autocapitalize="off" autocomplete="off" spellcheck="false"><button class="btn sm" id="followBtn">Follow</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn primary grow" id="checkBtn">Check for new posts</button></div>
+      <div id="checkState" class="muted" style="font-size:13px;margin-top:6px">${checked ? 'Last checked ' + new Date(checked).toLocaleString() : ''}</div>
+      <div class="chips" style="margin-top:10px"><a class="chip ${filter === 'places' ? 'on' : ''}" href="#/discover?show=places">Places found</a><a class="chip ${filter === 'all' ? 'on' : ''}" href="#/discover?show=all">All posts</a></div>
+      <div id="dlist">${shown.length ? shown.map((d) => discoverCard(d, savedIds)).join('') : `<div class="empty">${items.length ? 'No places found yet in these posts.' : 'Follow a creator and tap Check for new posts.'}</div>`}</div>`;
+
+    document.getElementById('followBtn').onclick = async () => {
+      const h = document.getElementById('newCreator').value.trim().replace(/^@/, '').toLowerCase();
+      if (!/^[a-z0-9._]{1,30}$/.test(h)) return toast('Enter an Instagram handle, e.g. danieldineskl');
+      await store.setKv('creators', Array.from(new Set([...creators, h]))); render();
+    };
+    document.getElementById('creatorChips').onclick = async (e) => {
+      const c = e.target.closest('[data-unfollow]'); if (!c) return;
+      if (!confirm(`Stop following @${c.dataset.unfollow}?`)) return;
+      await store.setKv('creators', creators.filter((x) => x !== c.dataset.unfollow)); render();
+    };
+    document.getElementById('checkBtn').onclick = async (e) => {
+      const btn = e.target; btn.disabled = true; const st = document.getElementById('checkState');
+      try {
+        const r = await checkCreators((msg) => { st.textContent = msg; });
+        toast(r.added ? `Found ${r.added} new post${r.added === 1 ? '' : 's'}` : 'No new posts');
+        if (r.problems.length) setTimeout(() => toast(r.problems[0], 6000), 2800);
+        render();
+      } catch (err) { st.textContent = err.message; btn.disabled = false; }
+    };
+    $app.querySelectorAll('[data-dsave]').forEach((b) => b.onclick = async () => {
+      const d = await store.get('discover', b.dataset.dsave); if (!d || !d.candidate) return;
+      const post = { id: uid(), collectionId: 'personal', venueId: null, addedAt: nowIso(), sharedBy: `@${d.handle} (Discover)`, url: d.permalink, shortcode: d.clues.shortcode, kind: d.clues.kind,
+        extractedText: d.caption || '', clues: { names: d.clues.names, areas: d.clues.areas, categories: d.clues.categories, menuItems: [], hashtags: [], creator: d.handle }, creatorHandle: d.handle, importStatus: 'pending' };
+      const saved = await saveVenueWithPost({ ...d.candidate }, post, d.status === 'high' ? 'verified' : 'confirmed');
+      d.savedVenueId = saved.venue.id; await store.put('discover', d);
+      toast(saved.merged ? `Added to your existing ${saved.venue.name}` : `Saved ${saved.venue.name}`); render();
+    });
+  });
+
   // ---------------- Settings ----------------
   route(/^\/settings$/, async () => {
     const venues = await allVenues(); const posts = await store.all('posts'); const log = await store.all('log');
@@ -595,6 +779,10 @@
       <label>Your name (shown as "shared by")</label><input type="text" id="myName" value="${esc(settings.myName)}">
       <h2>Locations</h2><p class="muted" style="font-size:14px;margin:0">Used for "near home" and "near office". Location is only asked for when you use it.</p>
       ${locRow('home', 'Home')}${locRow('office', 'Office')}
+      <h2>App server</h2>
+      <p class="muted" style="font-size:14px;margin:0">${(window.SP_CONFIG && window.SP_CONFIG.creatorsApi) ? 'Built into the app.' : 'Your Cloudflare Worker address. It reads pasted Instagram links (no Safari needed) and powers Discover.'}</p>
+      <div class="row" style="margin-top:6px"><input type="url" id="cApi" value="${esc(settings.creatorsApi || '')}" placeholder="${(window.SP_CONFIG && window.SP_CONFIG.creatorsApi) ? 'Optional — built-in address in use' : 'https://saved-places.yourname.workers.dev'}" autocapitalize="off"><button class="btn sm" id="cSave">Save</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" id="cTest">Test server</button><small id="cTestOut"></small></div>
       <h2>Venue lookup</h2>
       <p class="muted" style="font-size:14px;margin:0">${googleKey() ? `Using <b>Google Places</b>${!settings.googleKey ? ' (built into the app — nothing to set up).' : ' (your own key).'}` : 'Using free OpenStreetMap. Add a Google Places key for much better coverage.'}</p>
       <label>Google Places API key (stored only on this phone)</label>
@@ -615,6 +803,14 @@
       <h2>About</h2>
       <dl class="kv"><dt>Version</dt><dd>${APP_VERSION}</dd><dt>Mode</dt><dd>${standalone ? 'Home-screen web app' : 'Safari'}</dd><dt>Venue data</dt><dd>${googleKey() ? 'Google Places (Google Maps)' : '© OpenStreetMap contributors, via Photon and Nominatim'}</dd><dt>Privacy</dt><dd>No account, no Instagram login. Searches send only the venue name and area to OpenStreetMap services.</dd></dl>`;
 
+    document.getElementById('cSave').onclick = async () => { settings.creatorsApi = document.getElementById('cApi').value.trim(); await saveSettings(); toast('Saved'); render(); };
+    document.getElementById('cTest').onclick = async () => {
+      const out = document.getElementById('cTestOut'); const api = (document.getElementById('cApi').value.trim() || creatorsApi()).replace(/\/+$/, '');
+      if (!api) { out.textContent = 'Add the server address first'; return; }
+      out.textContent = 'Testing…';
+      try { const r = await (await fetch(api + '/health')).json(); out.textContent = 'Server works ✓ (reading links)' + (r.tokenSet && r.igUserSet ? ' · Discover ready ✓' : ' · Discover needs the Meta token'); }
+      catch (e) { out.textContent = 'Failed: ' + e.message; }
+    };
     document.getElementById('gSave').onclick = async () => { settings.googleKey = document.getElementById('gKey').value.trim(); await saveSettings(); toast(settings.googleKey ? 'Google key saved' : 'Key removed'); render(); };
     document.getElementById('gTest').onclick = async () => {
       const out = document.getElementById('gTestOut'); const key = document.getElementById('gKey').value.trim(); if (!key) { out.textContent = 'Paste a key first'; return; }
@@ -685,6 +881,7 @@
     const thumb = (qp.get('thumb') || '').startsWith('data:image/') ? qp.get('thumb') : null;
     imp = { postId: null, received: received + (qp.has('thumb') || qp.has('thumberr') ? ` · thumbnail ${thumb ? '✓' : '✗'}` : ''), url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: thumb, startedAt: Date.now(), result: null, stage: 'form' };
     const usable = fullText.trim() || account;
+    if (!usable && /instagram\.com\//i.test(url) && creatorsApi()) { location.hash = '#/import?auto=0&t=' + Date.now(); setTimeout(readThenImport, 50); return true; }
     if (!usable) setTimeout(() => toast(meta.status === 'login' ? "Instagram didn't share the caption for this post. Add a screenshot instead." : 'Got the link. Add a screenshot or the caption so I can find the place.', 5000), 300);
     location.hash = '#/import?auto=' + (usable ? '1' : '0') + '&t=' + Date.now();
     return true;

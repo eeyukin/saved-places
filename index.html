@@ -50,7 +50,7 @@ label { display: block; font-size: 14px; color: var(--muted); margin: 12px 0 6px
 .stack > * + * { margin-top: 10px; }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 6px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
-.chip { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 14px; cursor: pointer; white-space: nowrap; }
+.chip { text-decoration: none; color: inherit; flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 14px; cursor: pointer; white-space: nowrap; }
 .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; margin: 2px 4px 2px 0; }
 .card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); border: 1px solid var(--line); padding: 14px; }
@@ -103,10 +103,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
   <a href="#/" data-tab="home"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</a>
   <a href="#/places" data-tab="places"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.1-7-11a7 7 0 0 1 14 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>Places</a>
   <a href="#/import" data-tab="import" class="add"><span class="plus"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg></span>Add</a>
+  <a href="#/discover" data-tab="discover"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>Discover</a>
   <a href="#/settings" data-tab="settings"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
 </nav>
-<script src="config.js?v=12"></script>
-<script src="pipeline.js?v=12"></script>
-<script src="app.js?v=12"></script>
+<script src="config.js?v=16"></script>
+<script src="pipeline.js?v=16"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
