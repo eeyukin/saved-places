@@ -635,7 +635,8 @@
     const fullText = [meta.caption, text].filter((x) => x && x.trim()).join('\n');
     const metaRaw = qp.get('meta') || '';
     const received = `Received from the shortcut: link ${url ? '✓' : '✗ (empty)'} · page data ${metaRaw.length} characters, ${(metaRaw.match(/<meta/gi) || []).length} preview tags · caption ${meta.caption ? '✓' : '✗'}${meta.status === 'login' ? ' (Instagram sent a login page)' : ''}`;
-    imp = { postId: null, received, url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: null, startedAt: Date.now(), result: null, stage: 'form' };
+    const thumb = (qp.get('thumb') || '').startsWith('data:image/') ? qp.get('thumb') : null;
+    imp = { postId: null, received: received + (qp.has('thumb') || qp.has('thumberr') ? ` · thumbnail ${thumb ? '✓' : '✗'}` : ''), url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: thumb, startedAt: Date.now(), result: null, stage: 'form' };
     const usable = fullText.trim() || account;
     if (!usable) setTimeout(() => toast(meta.status === 'login' ? "Instagram didn't share the caption for this post. Add a screenshot instead." : 'Got the link. Add a screenshot or the caption so I can find the place.', 5000), 300);
     location.hash = '#/import?auto=' + (usable ? '1' : '0') + '&t=' + Date.now();
