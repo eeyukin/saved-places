@@ -349,6 +349,49 @@
     };
   }
 
+  // Google Places (New) Text Search, called from the browser with a key restricted to this website.
+  // Field mask stays in the Pro tier (no rating/hours/reviews) to keep within Google's free monthly usage.
+  const GOOGLE_TYPE_MAP = [
+    [/^(cafe|coffee_shop|tea_house|cat_cafe|dog_cafe)$/, 'amenity:cafe'], [/^(bakery|cake_shop|pastry_shop)$/, 'shop:bakery'],
+    [/^(ice_cream_shop|gelato_shop|frozen_yogurt_shop)$/, 'amenity:ice_cream'], [/^(dessert_shop|dessert_restaurant|confectionery|candy_store|chocolate_shop|donut_shop)$/, 'shop:confectionery'],
+    [/^(bar|pub|wine_bar|cocktail_bar|sports_bar|gastropub|bar_and_grill|brewpub|beer_garden)$/, 'amenity:bar'],
+    [/^(fast_food_restaurant|meal_takeaway|sandwich_shop|hamburger_restaurant|pizza_restaurant)$/, 'amenity:fast_food'], [/^food_court$/, 'amenity:food_court'],
+    [/restaurant$|^(diner|bistro|brunch_restaurant|breakfast_restaurant|meal_delivery|food)$/, 'amenity:restaurant'],
+  ];
+  const GOOGLE_CUISINE = { japanese_restaurant: 'Japanese food', sushi_restaurant: 'Japanese food', ramen_restaurant: 'Japanese food', korean_restaurant: 'Korean food', korean_barbecue_restaurant: 'Korean food', chinese_restaurant: 'Chinese food', dim_sum_restaurant: 'Chinese food', american_restaurant: 'Western food', steak_house: 'Western food', italian_restaurant: 'Western food', brunch_restaurant: 'Brunch', breakfast_restaurant: 'Breakfast', dessert_restaurant: 'Dessert', dessert_shop: 'Dessert' };
+  function googleTypeToOsm(types) {
+    for (const t of types) for (const [re, osm] of GOOGLE_TYPE_MAP) if (re.test(t)) return osm;
+    return 'google:' + (types[0] || 'place');
+  }
+  function googlePlacesProvider(fetchFn, apiKey) {
+    return {
+      id: 'google',
+      async search(q, region) {
+        const body = { textQuery: q, maxResultCount: 8, languageCode: 'en', regionCode: 'MY' };
+        if (region) body.locationBias = { circle: { center: { latitude: region.lat, longitude: region.lng }, radius: Math.min(50000, (region.radiusKm || 40) * 1000) } };
+        const res = await fetchFn('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey,
+            'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.shortFormattedAddress,places.location,places.types,places.primaryType,places.googleMapsUri,places.addressComponents' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) { let msg = 'Google ' + res.status; try { const e = await res.json(); if (e.error && e.error.message) msg += ': ' + e.error.message; } catch (x) { /* ignore */ } throw new Error(msg); }
+        const data = await res.json();
+        return (data.places || []).map((p) => {
+          const types = [p.primaryType, ...(p.types || [])].filter(Boolean);
+          const comp = (k) => ((p.addressComponents || []).find((c) => (c.types || []).includes(k)) || {}).longText || null;
+          return {
+            providerId: 'google:' + p.id, name: (p.displayName && p.displayName.text) || '', address: p.formattedAddress || p.shortFormattedAddress || '',
+            area: comp('sublocality_level_1') || comp('sublocality') || comp('neighborhood') || null, city: comp('locality') || comp('administrative_area_level_1') || null,
+            lat: p.location ? p.location.latitude : null, lng: p.location ? p.location.longitude : null,
+            osmType: googleTypeToOsm(types), extraCategories: types.map((t) => GOOGLE_CUISINE[t]).filter(Boolean),
+            mapsUrl: p.googleMapsUri || null, source: 'google',
+          };
+        }).filter((c) => c.name);
+      },
+    };
+  }
+
   // ---------- Stage 4: scoring ----------
   const SOURCE_BONUS = { pin: 15, tag: 15, mention: 8, account: 5, line: 0 };
 
@@ -378,7 +421,7 @@
       const d = haversineKm(region, c);
       if (d <= region.radiusKm) { score += 5; } else { score -= 15; reasons.push(`${Math.round(d)} km outside your region`); }
     }
-    return { ...c, score: Math.max(0, Math.min(100, score)), sim: best.sim, areaHit: !!areaHit, typeFit, reasons, categories: typeCat ? [typeCat] : [] };
+    return { ...c, score: Math.max(0, Math.min(100, score)), sim: best.sim, areaHit: !!areaHit, typeFit, reasons, categories: Array.from(new Set([...(typeCat ? [typeCat] : []), ...(c.extraCategories || [])])) };
   }
 
   function scoreCandidates(clues, candidates, region) {
@@ -426,11 +469,14 @@
     let all = [], errors = [];
     for (const p of providers) {
       step('search', { provider: p.id, queries: queries.map((q) => q.q) });
+      let done = false;
       for (const q of queries) {
-        try { all = all.concat(await p.search(q.q, region)); } catch (e) { errors.push(`${p.id}: ${e.message}`); }
+        try { all = all.concat(await p.search(q.q, region)); } catch (e) { errors.push(`${p.id}: ${e.message}`); if (/40[13]/.test(e.message)) break; }
+        // Stop as soon as one query gives a confident, clear winner (saves paid lookups).
+        const d = decide(scoreCandidates(clues, all, region), thresholds);
+        if (d.level === 'high') { done = true; break; }
       }
-      const scoredSoFar = scoreCandidates(clues, all, region);
-      if (scoredSoFar[0] && scoredSoFar[0].score >= (thresholds || DEFAULT_THRESHOLDS).auto) break;
+      if (done) break;
     }
     const scored = scoreCandidates(clues, all, region).slice(0, 6);
     const decision = decide(scored, thresholds);
@@ -441,7 +487,7 @@
   const SP = {
     AREAS, CATEGORIES, CATEGORY_WORDS, FOOD_TYPES, DEFAULT_THRESHOLDS,
     norm, nameSimilarity, haversineKm, findAreas, detectCategories, parseInstagramUrl, parseGoogleMaps,
-    extractClues, parseInstagramMeta, decodeEntities, buildQueries, googleMapsSearchUrl, photonProvider, nominatimProvider,
+    extractClues, parseInstagramMeta, decodeEntities, buildQueries, googleMapsSearchUrl, photonProvider, nominatimProvider, googlePlacesProvider,
     scoreCandidate, scoreCandidates, decide, findDuplicate, identify,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = SP; else root.SP = SP;
