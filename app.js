@@ -269,7 +269,6 @@
       <div style="margin-top:6px" id="tagList">${(v.tags || []).map((t) => `<span class="tag" data-tag="${esc(t)}">#${esc(t)} ✕</span>`).join('')}</div>
       <h3>Notes</h3>
       <textarea id="notes" placeholder="Cosy, good for dates, try the cheesecake…">${esc(v.notes || '')}</textarea>
-      ${(v.menuItems || []).length ? `<h3>Mentioned in posts</h3><div>${v.menuItems.map((mi) => `<span class="tag">${esc(mi.name)}${mi.price != null ? ' · RM' + esc(mi.price) : ''}</span>`).join('')}</div>` : ''}
       <h3>Instagram posts (${posts.length})</h3>
       <div class="stack">${posts.map((p) => `<div class="card"><div class="row"><div class="grow"><a href="${esc(p.url || '#')}" target="_blank" rel="noopener">${esc(p.url ? (p.kind === 'reel' ? 'Reel ' : 'Post ') + (p.shortcode || '') : 'No link saved')}</a><br><small>Shared by ${esc(p.sharedBy || '—')} · ${new Date(p.addedAt).toLocaleDateString()}${p.clues && p.clues.creator ? ' · by @' + esc(p.clues.creator) : ''}</small></div>
         <button class="btn sm ghost" data-unlink="${p.id}">Wrong place</button></div>
@@ -342,6 +341,7 @@
       <textarea id="iText" placeholder="Paste the caption here, e.g. 📍 Merchant's Lane, Petaling Street…">${esc(imp.text)}</textarea>
       <label>Screenshot of the post (optional)</label>
       <div class="row"><input type="file" id="iShot" accept="image/*" class="grow"></div>
+      ${imp.received ? `<div class="banner" style="font-size:13px">${esc(imp.received)}</div>` : ''}
       <div id="ocrState" class="muted" style="font-size:14px;margin-top:6px">${imp.photo ? 'Screenshot attached.' : ''}</div>
       <div class="row" style="margin-top:16px"><button class="btn" id="pasteBtn">Paste</button><button class="btn primary grow" id="goBtn">Find this place</button></div>
       ${imp.fromPending ? '<p><button class="btn ghost danger" id="dropBtn">Delete this pending post</button></p>' : ''}`;
@@ -449,7 +449,6 @@
     if (cl.names.length) parts.push(`<dt>Names</dt><dd>${cl.names.map((n) => `${esc(n.name)} <small>(${esc(n.source)})</small>`).join(', ')}</dd>`);
     if (cl.areas.length) parts.push(`<dt>Areas</dt><dd>${esc(cl.areas.map((a) => a.name).join(', '))}</dd>`);
     if (cl.categories.length) parts.push(`<dt>Looks like</dt><dd>${esc(cl.categories.join(', '))}</dd>`);
-    if (cl.menuItems.length) parts.push(`<dt>Menu items</dt><dd>${esc(cl.menuItems.map((m) => `${m.name} RM${m.price}`).join(', '))}</dd>`);
     if (cl.creator) parts.push(`<dt>Posted by</dt><dd>@${esc(cl.creator)}</dd>`);
     if (cl.hashtags.length) parts.push(`<dt>Hashtags</dt><dd>${esc(cl.hashtags.slice(0, 8).map((h) => '#' + h).join(' '))}</dd>`);
     return parts.length ? `<dl class="kv">${parts.join('')}</dl>` : '<small>No useful clues found. The link alone doesn\'t say which place it is.</small>';
@@ -477,7 +476,9 @@
     const r = imp.result; const cl = r.clues; const dec = r.decision;
     const cands = r.candidates.filter((c) => c.score >= 25);
     const gmaps = SP.googleMapsSearchUrl(cl, settings.region);
-    const levelBanner = dec.level === 'medium' ? `<div class="banner">Is this the place? <small>${esc(dec.why)}</small></div>`
+    const linkOnly = !(imp.text || '').trim() && !imp.account;
+    const levelBanner = linkOnly ? `<div class="banner warn"><b>I only have the link, not the caption.</b><br><small>A link pasted into the app can't be read: browsers block opening Instagram pages. On your iPhone, open the post in Instagram and tap Share → <b>Saved Places</b>; the shortcut reads the caption for you.</small></div>`
+      : dec.level === 'medium' ? `<div class="banner">Is this the place? <small>${esc(dec.why)}</small></div>`
       : `<div class="banner warn">${cands.length ? 'Not sure which place this is.' : r.queries.length ? 'No match found in OpenStreetMap.' : 'No venue name found in the text.'} <small>${esc(imp.error ? 'Search problem: ' + imp.error : '')}</small></div>`;
     $app.innerHTML = `
       <h1>${dec.level === 'medium' ? 'Confirm the place' : 'Help me find it'}</h1>
@@ -617,7 +618,9 @@
     const meta = SP.parseInstagramMeta(qp.get('meta') || '');
     const account = meta.status === 'ok' ? { handle: meta.handle, accountName: meta.accountName } : null;
     const fullText = [meta.caption, text].filter((x) => x && x.trim()).join('\n');
-    imp = { postId: null, url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: null, startedAt: Date.now(), result: null, stage: 'form' };
+    const metaRaw = qp.get('meta') || '';
+    const received = `Received from the shortcut: link ${url ? '✓' : '✗ (empty)'} · page data ${metaRaw.length} characters, ${(metaRaw.match(/<meta/gi) || []).length} preview tags · caption ${meta.caption ? '✓' : '✗'}${meta.status === 'login' ? ' (Instagram sent a login page)' : ''}`;
+    imp = { postId: null, received, url, text: fullText, account, metaStatus: qp.has('meta') ? meta.status : 'not_sent', photo: null, startedAt: Date.now(), result: null, stage: 'form' };
     const usable = fullText.trim() || account;
     if (!usable) setTimeout(() => toast(meta.status === 'login' ? "Instagram didn't share the caption for this post. Add a screenshot instead." : 'Got the link. Add a screenshot or the caption so I can find the place.', 5000), 300);
     location.hash = '#/import?auto=' + (usable ? '1' : '0') + '&t=' + Date.now();
